@@ -1,0 +1,33 @@
+.DS_Store
+
+# Build artifacts
+.build/
+Derived/
+.swiftpm/
+
+# Tuist-generated Xcode files
+*.xcodeproj/
+*.xcworkspace/
+
+# Xcode user data
+*.xcuserstate
+*.xcuserdata/
+
+# Local editor and agent state
+.agent/
+.agents/
+.claude/
+.cline/
+.codex/
+.cursor/
+.gemini/
+.github/skills/
+.opencode/
+.trae/
+
+# Misc local tooling
+.idea/
+.vscode/
+*.swp
+*.swo
+*.orig
