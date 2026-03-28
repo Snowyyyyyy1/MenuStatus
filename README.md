@@ -5,7 +5,7 @@ Monitor the public status of any service — right from your macOS menu bar.
 Supports [Atlassian Statuspage](https://www.atlassian.com/software/statuspage) and [incident.io](https://incident.io) powered status pages. Ships with **OpenAI** and **Anthropic** built in. Add any compatible service (GitHub, Cloudflare, 1Password, Twilio, ...) by pasting its status page URL.
 
 <p align="center">
-  <img src="screenshot.png" width="360" alt="MenuStatus showing Anthropic status with 90-day uptime bars">
+  <img src="screenshot.png" width="360" alt="MenuStatus showing multiple providers with the Claude status tab active">
 </p>
 
 ## Install
