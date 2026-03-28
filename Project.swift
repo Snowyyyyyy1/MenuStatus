@@ -11,8 +11,13 @@ let project = Project(
             deploymentTargets: .macOS("14.0"),
             infoPlist: .extendingDefault(with: [
                 "LSUIElement": .boolean(true),
+                "SUFeedURL": .string(""),
+                "SUPublicEDKey": .string(""),
             ]),
-            sources: ["Sources/**"]
+            sources: ["Sources/**"],
+            dependencies: [
+                .external(name: "Sparkle"),
+            ]
         ),
         .target(
             name: "MenuStatusTests",

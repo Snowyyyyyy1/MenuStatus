@@ -1,33 +1,5 @@
 import Foundation
 
-// MARK: - Provider
-
-enum Provider: String, CaseIterable, Hashable {
-    case openAI
-    case anthropic
-
-    var displayName: String {
-        switch self {
-        case .openAI: "OpenAI"
-        case .anthropic: "Claude"
-        }
-    }
-
-    var apiURL: URL {
-        switch self {
-        case .openAI: URL(string: "https://status.openai.com/api/v2/summary.json")!
-        case .anthropic: URL(string: "https://status.claude.com/api/v2/summary.json")!
-        }
-    }
-
-    var statusPageURL: URL {
-        switch self {
-        case .openAI: URL(string: "https://status.openai.com")!
-        case .anthropic: URL(string: "https://status.claude.com")!
-        }
-    }
-}
-
 // MARK: - Client
 
 struct StatusClient {
@@ -37,19 +9,19 @@ struct StatusClient {
         return decoder
     }()
 
-    static func fetchSummary(for provider: Provider) async throws -> StatuspageSummary {
+    static func fetchSummary(for provider: ProviderConfig) async throws -> StatuspageSummary {
         let data = try await fetchData(from: provider.apiURL)
         return try decoder.decode(StatuspageSummary.self, from: data)
     }
 
-    static func fetchOpenAIOfficialHistory() async throws -> OfficialHistorySnapshot {
-        let data = try await fetchData(from: Provider.openAI.statusPageURL)
-        return try parseOpenAIOfficialHistoryHTML(data)
-    }
-
-    static func fetchAnthropicOfficialHistory() async throws -> OfficialHistorySnapshot {
-        let data = try await fetchData(from: Provider.anthropic.statusPageURL)
-        return try parseAnthropicOfficialHistoryHTML(data)
+    static func fetchOfficialHistory(for provider: ProviderConfig) async throws -> OfficialHistorySnapshot {
+        let data = try await fetchData(from: provider.statusPageURL)
+        switch provider.platform {
+        case .incidentIO:
+            return try parseIncidentIOHistoryHTML(data)
+        case .atlassianStatuspage:
+            return try parseAtlassianStatuspageHistoryHTML(data)
+        }
     }
 
     static func validateHTTPResponse(_ response: URLResponse, for url: URL) throws {
@@ -68,19 +40,19 @@ struct StatusClient {
         return data
     }
 
-    static func parseOpenAIOfficialHistoryHTML(_ data: Data) throws -> OfficialHistorySnapshot {
+    static func parseIncidentIOHistoryHTML(_ data: Data) throws -> OfficialHistorySnapshot {
         guard let html = String(data: data, encoding: .utf8) else {
-            throw OpenAIHistoryParseError.invalidHTML
+            throw IncidentIOParseError.invalidHTML
         }
 
         let decodedBlocks = try extractDecodedNextBlocks(from: html)
 
         guard let summaryBlock = decodedBlocks.first(where: { $0.contains(#""summary":{"#) }) else {
-            throw OpenAIHistoryParseError.missingSummary
+            throw IncidentIOParseError.missingSummary
         }
 
         guard let dataBlock = decodedBlocks.first(where: { $0.contains(#""data":{"component_impacts""#) }) else {
-            throw OpenAIHistoryParseError.missingHistoryData
+            throw IncidentIOParseError.missingHistoryData
         }
 
         let summaryJSON = try sanitizeEmbeddedJSON(extractJSONObject(after: #""summary":"#, in: summaryBlock))
@@ -97,13 +69,13 @@ struct StatusClient {
         )
     }
 
-    static func parseAnthropicOfficialHistoryHTML(_ data: Data) throws -> OfficialHistorySnapshot {
+    static func parseAtlassianStatuspageHistoryHTML(_ data: Data) throws -> OfficialHistorySnapshot {
         guard let html = String(data: data, encoding: .utf8) else {
-            throw AnthropicHistoryParseError.invalidHTML
+            throw AtlassianStatuspageParseError.invalidHTML
         }
 
-        let generatedAt = parseAnthropicGeneratedAt(in: html)
-        let componentBlocks = try extractAnthropicComponentBlocks(from: html)
+        let generatedAt = parseStatuspageGeneratedAt(in: html)
+        let componentBlocks = try extractStatuspageComponentBlocks(from: html)
         let components = Dictionary(uniqueKeysWithValues: componentBlocks.map { ($0.id, $0) })
 
         return OfficialHistorySnapshot(generatedAt: generatedAt, groups: [], componentsByID: components)
@@ -124,7 +96,7 @@ struct StatusClient {
         return parseISO(String(text[range]))
     }
 
-    private static func parseAnthropicGeneratedAt(in html: String) -> Date? {
+    private static func parseStatuspageGeneratedAt(in html: String) -> Date? {
         let pattern = #"<meta\s+name="issued"\s+content="([0-9]+)""#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
               let match = regex.firstMatch(
@@ -185,18 +157,18 @@ struct StatusClient {
         return OfficialHistorySnapshot(generatedAt: generatedAt, groups: groups, componentsByID: mappedComponents)
     }
 
-    private static func extractAnthropicComponentBlocks(from html: String) throws -> [OfficialHistoryComponent] {
+    private static func extractStatuspageComponentBlocks(from html: String) throws -> [OfficialHistoryComponent] {
         let marker = #"<div data-component-id=""#
         let componentRanges = allRanges(of: marker, in: html)
 
         return componentRanges.enumerated().compactMap { index, startIndex in
             let endIndex = index + 1 < componentRanges.count ? componentRanges[index + 1] : html.endIndex
             let block = String(html[startIndex..<endIndex])
-            return parseAnthropicComponentBlock(block)
+            return parseStatuspageComponentBlock(block)
         }
     }
 
-    private static func parseAnthropicComponentBlock(_ html: String) -> OfficialHistoryComponent? {
+    private static func parseStatuspageComponentBlock(_ html: String) -> OfficialHistoryComponent? {
         guard let componentId = firstMatch(in: html, pattern: #"<div\s+data-component-id="([^"]+)""#, group: 1),
               let name = firstMatch(in: html, pattern: #"<span class="name">\s*(.*?)\s*</span>"#, group: 1),
               let svg = firstMatch(
@@ -214,7 +186,7 @@ struct StatusClient {
             return nil
         }
 
-        let fills = extractAnthropicFills(from: svg)
+        let fills = extractStatuspageFills(from: svg)
         guard !fills.isEmpty else { return nil }
 
         return OfficialHistoryComponent(
@@ -228,7 +200,7 @@ struct StatusClient {
         )
     }
 
-    private static func extractAnthropicFills(from svg: String) -> [String] {
+    private static func extractStatuspageFills(from svg: String) -> [String] {
         let pattern = #"<rect[^>]*\bfill="(#[0-9A-Fa-f]{6})"[^>]*class="[^"]*\buptime-day\b[^"]*\bday-([0-9]+)\b[^"]*"[^>]*/?>"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
         let range = NSRange(svg.startIndex..<svg.endIndex, in: svg)
@@ -307,12 +279,12 @@ struct StatusClient {
 
     private static func extractJSONObject(after marker: String, in text: String) throws -> String {
         guard let markerRange = text.range(of: marker) else {
-            throw OpenAIHistoryParseError.missingMarker(marker)
+            throw IncidentIOParseError.missingMarker(marker)
         }
 
         let suffix = text[markerRange.upperBound...]
         guard let objectStart = suffix.firstIndex(of: "{") else {
-            throw OpenAIHistoryParseError.missingObjectAfterMarker(marker)
+            throw IncidentIOParseError.missingObjectAfterMarker(marker)
         }
 
         var depth = 0
@@ -351,7 +323,7 @@ struct StatusClient {
             currentIndex = text.index(after: currentIndex)
         }
 
-        throw OpenAIHistoryParseError.unterminatedObject(marker)
+        throw IncidentIOParseError.unterminatedObject(marker)
     }
 
     private static func sanitizeEmbeddedJSON(_ json: String) -> String {
@@ -359,23 +331,11 @@ struct StatusClient {
     }
 
     private static func parseISO(_ value: String) -> Date? {
-        iso.date(from: value) ?? isoFallback.date(from: value)
+        ComponentTimeline.parseISODate(value)
     }
-
-    private static let iso: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-
-    private static let isoFallback: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
 }
 
-enum OpenAIHistoryParseError: Error {
+enum IncidentIOParseError: Error {
     case invalidHTML
     case missingSummary
     case missingHistoryData
@@ -384,7 +344,7 @@ enum OpenAIHistoryParseError: Error {
     case unterminatedObject(String)
 }
 
-enum AnthropicHistoryParseError: Error {
+enum AtlassianStatuspageParseError: Error {
     case invalidHTML
 }
 

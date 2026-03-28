@@ -3,7 +3,7 @@ import XCTest
 
 final class StatusStoreTests: XCTestCase {
     func testUnhealthyGroupsAutoExpandUntilUserOverridesThem() {
-        let store = StatusStore()
+        let store = StatusStore(settings: SettingsStore())
         let unhealthySection = GroupedComponentSection(
             id: "codex",
             title: "Codex",
@@ -25,7 +25,7 @@ final class StatusStoreTests: XCTestCase {
         <script>self.__next_f.push([1,"1e:[\\"$\\",\\"$L20\\",null,{\\"summary\\":\\"$5:1:props:summary\\",\\"data\\":{\\"component_impacts\\":[{\\"component_id\\":\\"comp-chat\\",\\"start_at\\":\\"2026-03-26T21:35:24.608Z\\",\\"end_at\\":\\"2026-03-26T23:17:25.337Z\\",\\"status\\":\\"degraded_performance\\",\\"status_page_incident_id\\":\\"incident-1\\"}],\\"component_uptimes\\":[{\\"component_id\\":\\"comp-chat\\",\\"status_page_component_group_id\\":null,\\"uptime\\":\\"99.99\\"},{\\"component_id\\":null,\\"status_page_component_group_id\\":\\"group-apis\\",\\"uptime\\":\\"99.98\\"}]}}]"])</script>
         """
 
-        let payload = try StatusClient.parseOpenAIOfficialHistoryHTML(Data(html.utf8))
+        let payload = try StatusClient.parseIncidentIOHistoryHTML(Data(html.utf8))
 
         XCTAssertEqual(payload.groups.first?.name, "APIs")
         XCTAssertEqual(payload.componentsByID["comp-chat"]?.name, "Chat Completions")
@@ -45,19 +45,21 @@ final class StatusStoreTests: XCTestCase {
             timeline: existingTimeline
         )
 
+        let provider = ProviderConfig.openAI
         let derivedState = StatusStore.derivePresentationState(
+            providers: [provider],
             summaries: [
-                .openAI: makeSummary(components: [
+                provider: makeSummary(components: [
                     makeComponent(id: "api", name: "Fine-tuning"),
                 ]),
             ],
-            currentTimelines: [.openAI: ["existing": existingTimeline]],
-            currentSections: [.openAI: [existingSection]],
+            currentTimelines: [provider: ["existing": existingTimeline]],
+            currentSections: [provider: [existingSection]],
             officialHistories: [:]
         )
 
-        XCTAssertEqual(derivedState.timelines[.openAI]?["existing"]?.days.count, existingTimeline.days.count)
-        XCTAssertEqual(derivedState.sections[.openAI]?.map(\.id), ["existing"])
+        XCTAssertEqual(derivedState.timelines[provider]?["existing"]?.days.count, existingTimeline.days.count)
+        XCTAssertEqual(derivedState.sections[provider]?.map(\.id), ["existing"])
     }
 
     func testParseAnthropicOfficialHistoryHTMLExtractsComponentUptime() throws {
@@ -93,7 +95,7 @@ final class StatusStoreTests: XCTestCase {
         </html>
         """
 
-        let payload = try StatusClient.parseAnthropicOfficialHistoryHTML(Data(html.utf8))
+        let payload = try StatusClient.parseAtlassianStatuspageHistoryHTML(Data(html.utf8))
 
         XCTAssertEqual(payload.componentsByID["claude"]?.name, "claude.ai")
         XCTAssertEqual(payload.componentsByID["claude"]?.uptimePercent, 98.95)
@@ -118,7 +120,7 @@ final class StatusStoreTests: XCTestCase {
             ]
         )
 
-        let timelines = StatusStore.buildOfficialAnthropicTimelines(
+        let timelines = StatusStore.buildFlatTimelines(
             snapshot: officialHistory,
             summary: summary
         )
@@ -152,7 +154,7 @@ final class StatusStoreTests: XCTestCase {
             ]
         )
 
-        let timeline = StatusStore.buildOfficialAnthropicTimelines(
+        let timeline = StatusStore.buildFlatTimelines(
             snapshot: payload,
             summary: summary
         )["claude"]
@@ -174,7 +176,7 @@ final class StatusStoreTests: XCTestCase {
         )
         let payload = OfficialHistorySnapshot(generatedAt: nil, groups: [], componentsByID: [:])
 
-        let timeline = StatusStore.buildOfficialAnthropicTimelines(
+        let timeline = StatusStore.buildFlatTimelines(
             snapshot: payload,
             summary: summary
         )["missing"]

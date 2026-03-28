@@ -1,6 +1,41 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Platform & Provider
+
+enum StatusPlatform: String, Codable {
+    case atlassianStatuspage
+    case incidentIO
+}
+
+struct ProviderConfig: Codable, Identifiable, Hashable {
+    let id: String
+    var displayName: String
+    var baseURL: URL
+    var platform: StatusPlatform
+    var isBuiltIn: Bool
+
+    var apiURL: URL { baseURL.appendingPathComponent("api/v2/summary.json") }
+    var statusPageURL: URL { baseURL }
+
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+}
+
+extension ProviderConfig {
+    static let openAI = ProviderConfig(
+        id: "openai", displayName: "OpenAI",
+        baseURL: URL(string: "https://status.openai.com")!,
+        platform: .incidentIO, isBuiltIn: true
+    )
+    static let anthropic = ProviderConfig(
+        id: "anthropic", displayName: "Claude",
+        baseURL: URL(string: "https://status.claude.com")!,
+        platform: .atlassianStatuspage, isBuiltIn: true
+    )
+    static let builtInProviders: [ProviderConfig] = [.openAI, .anthropic]
+}
+
 // MARK: - Statuspage API Response
 
 struct StatuspageSummary: Codable {
@@ -31,6 +66,7 @@ enum StatusIndicator: String, Codable, Comparable {
     case minor
     case major
     case critical
+    case maintenance
 
     var displayName: String {
         switch self {
@@ -38,15 +74,27 @@ enum StatusIndicator: String, Codable, Comparable {
         case .minor: "Minor Issues"
         case .major: "Major Outage"
         case .critical: "Critical Outage"
+        case .maintenance: "Maintenance"
         }
     }
 
     var sfSymbol: String {
         switch self {
         case .none: "checkmark.circle.fill"
-        case .minor: "exclamationmark.triangle.fill"
-        case .major: "xmark.circle.fill"
-        case .critical: "xmark.octagon.fill"
+        case .minor: "minus.square.fill"
+        case .major: "exclamationmark.triangle.fill"
+        case .critical: "xmark.circle.fill"
+        case .maintenance: "wrench.and.screwdriver.fill"
+        }
+    }
+
+    var menuBarSymbol: String {
+        switch self {
+        case .none: "checkmark.circle"
+        case .minor: "minus.square"
+        case .major: "exclamationmark.triangle"
+        case .critical: "xmark.circle"
+        case .maintenance: "wrench.and.screwdriver"
         }
     }
 
@@ -56,15 +104,39 @@ enum StatusIndicator: String, Codable, Comparable {
         case .minor: .yellow
         case .major: .orange
         case .critical: .red
+        case .maintenance: .blue
+        }
+    }
+
+    /// Impact label for use in incident/maintenance badges (distinct from page-level displayName)
+    var impactLabel: String {
+        switch self {
+        case .none: "None"
+        case .minor: "Minor"
+        case .major: "Major"
+        case .critical: "Critical"
+        case .maintenance: "Maintenance"
+        }
+    }
+
+    /// Color for incident/maintenance impact badges
+    var impactColor: Color {
+        switch self {
+        case .none: .secondary
+        case .minor: .yellow
+        case .major: .orange
+        case .critical: .red
+        case .maintenance: .blue
         }
     }
 
     private var severity: Int {
         switch self {
         case .none: 0
-        case .minor: 1
-        case .major: 2
-        case .critical: 3
+        case .maintenance: 1
+        case .minor: 2
+        case .major: 3
+        case .critical: 4
         }
     }
 
@@ -133,11 +205,31 @@ extension ComponentStatus: Comparable {
 
 // MARK: - Incident
 
+enum IncidentStatus: String, Codable {
+    case investigating
+    case identified
+    case monitoring
+    case resolved
+    case postmortem
+    // Maintenance-specific statuses (Statuspage reuses Incident shape for scheduled_maintenances)
+    case scheduled
+    case inProgress = "in_progress"
+    case verifying
+    case completed
+
+    var isActive: Bool {
+        switch self {
+        case .investigating, .identified, .monitoring, .scheduled, .inProgress, .verifying: true
+        case .resolved, .postmortem, .completed: false
+        }
+    }
+}
+
 struct Incident: Codable, Identifiable {
     let id: String
     let name: String
-    let status: String
-    let impact: String?
+    let status: IncidentStatus
+    let impact: StatusIndicator?
     let shortlink: String?
     let startedAt: String?
     let createdAt: String?

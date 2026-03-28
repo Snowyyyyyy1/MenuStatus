@@ -3,15 +3,20 @@ import Observation
 
 @Observable
 final class StatusStore {
-    var summaries: [Provider: StatuspageSummary] = [:]
-    var componentTimelines: [Provider: [String: ComponentTimeline]] = [:]
-    var groupedSections: [Provider: [GroupedComponentSection]] = [:]
+    var summaries: [ProviderConfig: StatuspageSummary] = [:]
+    var componentTimelines: [ProviderConfig: [String: ComponentTimeline]] = [:]
+    var groupedSections: [ProviderConfig: [GroupedComponentSection]] = [:]
     var lastRefreshed: Date?
     var isLoading = false
     var errorMessage: String?
 
     private var pollingTask: Task<Void, Never>?
-    private var openAIGroupExpansionOverrides: [String: Bool] = [:]
+    private var groupExpansionOverrides: [String: Bool] = [:]
+    let settings: SettingsStore
+
+    init(settings: SettingsStore) {
+        self.settings = settings
+    }
 
     var overallIndicator: StatusIndicator {
         let indicators = summaries.values.map(\.status.indicator)
@@ -23,7 +28,11 @@ final class StatusStore {
         pollingTask = Task {
             while !Task.isCancelled {
                 await refreshNow()
-                try? await Task.sleep(for: .seconds(60))
+                do {
+                    try await Task.sleep(for: .seconds(settings.refreshInterval))
+                } catch {
+                    break
+                }
             }
         }
     }
@@ -33,21 +42,21 @@ final class StatusStore {
         pollingTask = nil
     }
 
-    func timeline(for provider: Provider, componentId: String) -> ComponentTimeline? {
+    func timeline(for provider: ProviderConfig, componentId: String) -> ComponentTimeline? {
         componentTimelines[provider]?[componentId]
     }
 
-    func sections(for provider: Provider) -> [GroupedComponentSection] {
+    func sections(for provider: ProviderConfig) -> [GroupedComponentSection] {
         groupedSections[provider] ?? []
     }
 
     func isExpanded(_ section: GroupedComponentSection) -> Bool {
-        openAIGroupExpansionOverrides[section.id] ?? (section.status != .operational)
+        groupExpansionOverrides[section.id] ?? (section.status != .operational)
     }
 
     func toggleExpansion(for section: GroupedComponentSection) {
         let currentValue = isExpanded(section)
-        openAIGroupExpansionOverrides[section.id] = !currentValue
+        groupExpansionOverrides[section.id] = !currentValue
     }
 
     @MainActor
@@ -55,15 +64,17 @@ final class StatusStore {
         isLoading = true
         errorMessage = nil
 
-        var stagedSummaries = summaries
+        let activeProviders = settings.providerConfigs.enabledProviders(settings: settings)
+        let activeSet = Set(activeProviders)
+        var stagedSummaries = summaries.filter { activeSet.contains($0.key) }
 
         enum FetchResult {
-            case summary(Provider, Result<StatuspageSummary, Error>)
-            case officialHistory(Provider, Result<OfficialHistorySnapshot, Error>)
+            case summary(ProviderConfig, Result<StatuspageSummary, Error>)
+            case officialHistory(ProviderConfig, Result<OfficialHistorySnapshot, Error>)
         }
 
         await withTaskGroup(of: FetchResult.self) { group in
-            for provider in Provider.allCases {
+            for provider in activeProviders {
                 group.addTask {
                     do {
                         let summary = try await StatusClient.fetchSummary(for: provider)
@@ -72,28 +83,19 @@ final class StatusStore {
                         return .summary(provider, .failure(error))
                     }
                 }
-            }
 
-            group.addTask {
-                do {
-                    let history = try await StatusClient.fetchOpenAIOfficialHistory()
-                    return .officialHistory(.openAI, .success(history))
-                } catch {
-                    return .officialHistory(.openAI, .failure(error))
-                }
-            }
-
-            group.addTask {
-                do {
-                    let history = try await StatusClient.fetchAnthropicOfficialHistory()
-                    return .officialHistory(.anthropic, .success(history))
-                } catch {
-                    return .officialHistory(.anthropic, .failure(error))
+                group.addTask {
+                    do {
+                        let history = try await StatusClient.fetchOfficialHistory(for: provider)
+                        return .officialHistory(provider, .success(history))
+                    } catch {
+                        return .officialHistory(provider, .failure(error))
+                    }
                 }
             }
 
             var errors: [String] = []
-            var officialHistories: [Provider: OfficialHistorySnapshot] = [:]
+            var officialHistories: [ProviderConfig: OfficialHistorySnapshot] = [:]
             for await result in group {
                 switch result {
                 case .summary(let provider, .success(let summary)):
@@ -112,13 +114,13 @@ final class StatusStore {
             }
 
             let derivedState = Self.derivePresentationState(
+                providers: activeProviders,
                 summaries: stagedSummaries,
-                currentTimelines: componentTimelines,
-                currentSections: groupedSections,
+                currentTimelines: componentTimelines.filter { activeSet.contains($0.key) },
+                currentSections: groupedSections.filter { activeSet.contains($0.key) },
                 officialHistories: officialHistories
             )
 
-            // Publish the refresh snapshot in one pass so the menu never renders a partial state.
             summaries = stagedSummaries
             componentTimelines = derivedState.timelines
             groupedSections = derivedState.sections
@@ -129,43 +131,49 @@ final class StatusStore {
     }
 }
 
+// MARK: - Presentation Derivation
+
 extension StatusStore {
     static func derivePresentationState(
-        summaries: [Provider: StatuspageSummary],
-        currentTimelines: [Provider: [String: ComponentTimeline]],
-        currentSections: [Provider: [GroupedComponentSection]],
-        officialHistories: [Provider: OfficialHistorySnapshot]
+        providers: [ProviderConfig],
+        summaries: [ProviderConfig: StatuspageSummary],
+        currentTimelines: [ProviderConfig: [String: ComponentTimeline]],
+        currentSections: [ProviderConfig: [GroupedComponentSection]],
+        officialHistories: [ProviderConfig: OfficialHistorySnapshot]
     ) -> (
-        timelines: [Provider: [String: ComponentTimeline]],
-        sections: [Provider: [GroupedComponentSection]]
+        timelines: [ProviderConfig: [String: ComponentTimeline]],
+        sections: [ProviderConfig: [GroupedComponentSection]]
     ) {
         var nextTimelines = currentTimelines
         var nextSections = currentSections
 
-        for provider in Provider.allCases {
-            guard let summary = summaries[provider] else {
+        for provider in providers {
+            guard let summary = summaries[provider] else { continue }
+
+            guard let officialHistory = officialHistories[provider] else {
+                nextTimelines[provider] = currentTimelines[provider] ?? [:]
                 continue
             }
 
-            switch provider {
-            case .openAI:
-                if let officialHistory = officialHistories[provider], !officialHistory.groups.isEmpty {
-                    let officialProjection = Self.buildOfficialOpenAISections(
-                        snapshot: officialHistory,
-                        currentSummary: summary
-                    )
-                    nextTimelines[provider] = officialProjection.timelines
-                    nextSections[provider] = officialProjection.sections
-                }
-            case .anthropic:
-                if let officialHistory = officialHistories[provider] {
-                    nextTimelines[provider] = Self.buildOfficialAnthropicTimelines(
-                        snapshot: officialHistory,
-                        summary: summary
-                    )
-                } else {
-                    nextTimelines[provider] = currentTimelines[provider] ?? [:]
-                }
+            if !officialHistory.groups.isEmpty {
+                let projection = buildGroupedSections(
+                    snapshot: officialHistory,
+                    currentSummary: summary
+                )
+                nextTimelines[provider] = projection.timelines
+                nextSections[provider] = projection.sections
+            } else if summary.components.contains(where: { $0.group == true }) {
+                let projection = buildGroupedSectionsFromSummary(
+                    snapshot: officialHistory,
+                    summary: summary
+                )
+                nextTimelines[provider] = projection.timelines
+                nextSections[provider] = projection.sections
+            } else {
+                nextTimelines[provider] = buildFlatTimelines(
+                    snapshot: officialHistory,
+                    summary: summary
+                )
                 nextSections[provider] = []
             }
         }
@@ -173,7 +181,7 @@ extension StatusStore {
         return (nextTimelines, nextSections)
     }
 
-    static func buildOfficialAnthropicTimelines(
+    static func buildFlatTimelines(
         snapshot: OfficialHistorySnapshot,
         summary: StatuspageSummary
     ) -> [String: ComponentTimeline] {
@@ -187,20 +195,19 @@ extension StatusStore {
                     now: now,
                     timeZoneIdentifier: summary.page.timeZone
                 )
-                continue
+            } else {
+                timelines[component.id] = ComponentTimeline.buildUnavailable(
+                    title: component.name,
+                    now: now,
+                    timeZoneIdentifier: summary.page.timeZone
+                )
             }
-
-            timelines[component.id] = ComponentTimeline.buildUnavailable(
-                title: component.name,
-                now: now,
-                timeZoneIdentifier: summary.page.timeZone
-            )
         }
 
         return timelines
     }
 
-    static func buildOfficialOpenAISections(
+    static func buildGroupedSections(
         snapshot: OfficialHistorySnapshot,
         currentSummary: StatuspageSummary
     ) -> (sections: [GroupedComponentSection], timelines: [String: ComponentTimeline]) {
@@ -267,11 +274,54 @@ extension StatusStore {
         return (sections, timelines)
     }
 
+    static func buildGroupedSectionsFromSummary(
+        snapshot: OfficialHistorySnapshot,
+        summary: StatuspageSummary
+    ) -> (sections: [GroupedComponentSection], timelines: [String: ComponentTimeline]) {
+        let now = snapshot.generatedAt ?? Date()
+        let groupComponents = summary.components.filter { $0.group == true }
+
+        var timelines: [String: ComponentTimeline] = [:]
+        let sections = groupComponents.compactMap { groupComp -> GroupedComponentSection? in
+            let children = summary.components.filter {
+                $0.groupId == groupComp.id && $0.group != true
+                    && $0.onlyShowIfDegraded != true
+            }
+            guard !children.isEmpty else { return nil }
+
+            for child in children {
+                if let officialComp = snapshot.componentsByID[child.id] {
+                    timelines[child.id] = ComponentTimeline.build(
+                        from: officialComp, now: now,
+                        timeZoneIdentifier: summary.page.timeZone
+                    )
+                } else {
+                    timelines[child.id] = ComponentTimeline.buildUnavailable(
+                        title: child.name, now: now,
+                        timeZoneIdentifier: summary.page.timeZone
+                    )
+                }
+            }
+
+            let groupStatus = children.map(\.status).max() ?? .operational
+            let childTimelines = children.compactMap { timelines[$0.id] }
+
+            return GroupedComponentSection(
+                id: groupComp.id,
+                title: groupComp.name,
+                components: children,
+                status: groupStatus,
+                timeline: ComponentTimeline.aggregate(childTimelines, title: groupComp.name)
+            )
+        }
+
+        return (sections, timelines)
+    }
+
     static func currentOfficialStatus(impacts: [OfficialComponentImpact], now: Date) -> ComponentStatus {
-        let activeStatuses = impacts
+        impacts
             .filter { $0.isActive(at: now) }
             .map(\.componentStatus)
-
-        return activeStatuses.max() ?? .operational
+            .max() ?? .operational
     }
 }

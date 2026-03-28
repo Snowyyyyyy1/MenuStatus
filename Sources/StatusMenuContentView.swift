@@ -3,36 +3,43 @@ import SwiftUI
 
 private enum MenuContentSizing {
     static let width: CGFloat = 360
-    static let fallbackHeight: CGFloat = 160
     static let minScreenMargin: CGFloat = 140
 }
 
 struct StatusMenuContentView: View {
     let store: StatusStore
-    @State private var selectedProvider: Provider = .openAI
-    @State private var measuredContentHeights: [Provider: CGFloat] = [:]
+    @Environment(\.openWindow) private var openWindow
+    @State private var selectedProvider: ProviderConfig?
+    @State private var contentHeight: CGFloat = 0
 
-    private var selectedContentHeight: CGFloat {
-        measuredContentHeights[selectedProvider] ?? MenuContentSizing.fallbackHeight
+    private var enabledProviders: [ProviderConfig] {
+        store.settings.providerConfigs.enabledProviders(settings: store.settings)
+    }
+
+    private var activeProvider: ProviderConfig? {
+        if let selectedProvider, enabledProviders.contains(selectedProvider) {
+            return selectedProvider
+        }
+        return enabledProviders.first
     }
 
     private var maxVisibleContentHeight: CGFloat {
         let screenHeight = NSScreen.main?.visibleFrame.height ?? 900
-        return max(MenuContentSizing.fallbackHeight, screenHeight - MenuContentSizing.minScreenMargin)
+        return max(200, screenHeight - MenuContentSizing.minScreenMargin)
     }
 
-    private var shouldScroll: Bool {
-        selectedContentHeight > maxVisibleContentHeight
+    private var needsScroll: Bool {
+        contentHeight > maxVisibleContentHeight
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Tab bar
             HStack(spacing: 0) {
-                ForEach(Provider.allCases, id: \.self) { provider in
+                ForEach(enabledProviders) { provider in
                     ProviderTab(
                         provider: provider,
-                        isSelected: selectedProvider == provider,
+                        isSelected: activeProvider == provider,
                         indicator: store.summaries[provider]?.status.indicator
                     ) {
                         withAnimation(.easeInOut(duration: 0.15)) {
@@ -48,10 +55,14 @@ struct StatusMenuContentView: View {
             Divider()
 
             // Selected provider content
-            contentContainer
-            .animation(.easeInOut(duration: 0.15), value: shouldScroll)
-            .animation(.easeInOut(duration: 0.15), value: selectedContentHeight)
-            .onPreferenceChange(MenuContentHeightPreferenceKey.self, perform: updateMeasuredContentHeight)
+            if needsScroll {
+                ScrollView {
+                    measuredContent
+                }
+                .frame(height: maxVisibleContentHeight)
+            } else {
+                measuredContent
+            }
 
             Divider()
 
@@ -72,21 +83,38 @@ struct StatusMenuContentView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if store.isLoading {
-                    ProgressView()
-                        .controlSize(.mini)
-                }
-                Button("Refresh") {
-                    Task { await store.refreshNow() }
-                }
-                .buttonStyle(.borderless)
-                .font(.caption)
 
-                Button("Quit") {
-                    NSApplication.shared.terminate(nil)
+                HStack(spacing: 12) {
+                    if store.isLoading {
+                        ProgressView()
+                            .controlSize(.mini)
+                    } else {
+                        Button {
+                            Task { await store.refreshNow() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .help("Refresh")
+                    }
+
+                    Button {
+                        openWindow(id: "settings")
+                        NSApp.activate(ignoringOtherApps: true)
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .help("Settings")
+
+                    Button {
+                        NSApplication.shared.terminate(nil)
+                    } label: {
+                        Image(systemName: "power")
+                    }
+                    .help("Quit")
                 }
                 .buttonStyle(.borderless)
-                .font(.caption)
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -94,11 +122,26 @@ struct StatusMenuContentView: View {
         .frame(width: MenuContentSizing.width)
     }
 
+    private var measuredContent: some View {
+        selectedProviderContent
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear.onAppear {
+                        contentHeight = proxy.size.height
+                    }
+                    .onChange(of: proxy.size.height) { _, newHeight in
+                        contentHeight = newHeight
+                    }
+                }
+            }
+    }
+
     @ViewBuilder
     private var selectedProviderContent: some View {
-        if let summary = store.summaries[selectedProvider] {
+        if let provider = activeProvider, let summary = store.summaries[provider] {
             ProviderSectionView(
-                provider: selectedProvider,
+                provider: provider,
                 summary: summary,
                 store: store
             )
@@ -114,50 +157,12 @@ struct StatusMenuContentView: View {
             .padding(.vertical, 40)
         }
     }
-
-    @ViewBuilder
-    private var contentContainer: some View {
-        if shouldScroll {
-            ScrollView {
-                measuredSelectedProviderContent
-            }
-            .frame(height: maxVisibleContentHeight)
-        } else {
-            measuredSelectedProviderContent
-        }
-    }
-
-    private var measuredSelectedProviderContent: some View {
-        selectedProviderContent
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-            .background {
-                GeometryReader { proxy in
-                    Color.clear.preference(
-                        key: MenuContentHeightPreferenceKey.self,
-                        value: proxy.size.height
-                    )
-                }
-            }
-    }
-
-    private func updateMeasuredContentHeight(_ newHeight: CGFloat) {
-        guard newHeight > 0 else { return }
-        measuredContentHeights[selectedProvider] = newHeight
-    }
-}
-
-private struct MenuContentHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
 }
 
 // MARK: - Provider Tab
 
 struct ProviderTab: View {
-    let provider: Provider
+    let provider: ProviderConfig
     let isSelected: Bool
     let indicator: StatusIndicator?
     let action: () -> Void

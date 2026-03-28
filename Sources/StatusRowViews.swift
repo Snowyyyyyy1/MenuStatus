@@ -7,7 +7,7 @@ private enum UptimeBarStyle {
 // MARK: - Provider Section
 
 struct ProviderSectionView: View {
-    let provider: Provider
+    let provider: ProviderConfig
     let summary: StatuspageSummary
     let store: StatusStore
 
@@ -16,11 +16,11 @@ struct ProviderSectionView: View {
     }
 
     private var activeIncidents: [Incident] {
-        (summary.incidents ?? []).filter { $0.status != "resolved" && $0.status != "postmortem" }
+        (summary.incidents ?? []).filter { $0.status.isActive }
     }
 
     private var groupedSections: [GroupedComponentSection] {
-        provider == .openAI ? store.sections(for: provider) : []
+        store.sections(for: provider)
     }
 
     var body: some View {
@@ -47,28 +47,29 @@ struct ProviderSectionView: View {
                 .padding(.horizontal, 16)
 
             if groupedSections.isEmpty {
-                ForEach(visibleComponents) { component in
+                ForEach(Array(visibleComponents.enumerated()), id: \.element.id) { index, component in
                     ComponentUptimeRow(
                         component: component,
                         timeline: store.timeline(for: provider, componentId: component.id),
                         statusPageURL: provider.statusPageURL
                     )
 
-                    if component.id != visibleComponents.last?.id {
+                    if index < visibleComponents.count - 1 {
                         Divider()
                             .padding(.horizontal, 16)
                     }
                 }
             } else {
-                ForEach(groupedSections) { section in
+                ForEach(Array(groupedSections.enumerated()), id: \.element.id) { index, section in
                     GroupedComponentSectionView(
                         section: section,
                         isExpanded: store.isExpanded(section),
+                        provider: provider,
                         store: store,
                         statusPageURL: provider.statusPageURL
                     )
 
-                    if section.id != groupedSections.last?.id {
+                    if index < groupedSections.count - 1 {
                         Divider()
                             .padding(.horizontal, 16)
                     }
@@ -84,6 +85,7 @@ struct ProviderSectionView: View {
 struct GroupedComponentSectionView: View {
     let section: GroupedComponentSection
     let isExpanded: Bool
+    let provider: ProviderConfig
     let store: StatusStore
     let statusPageURL: URL
 
@@ -114,21 +116,7 @@ struct GroupedComponentSectionView: View {
                     }
 
                     if let timeline = section.timeline {
-                        UptimeBarView(timeline: timeline, height: UptimeBarStyle.height)
-
-                        HStack {
-                            Text("90 days ago")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.tertiary)
-                            Spacer()
-                            Text(timeline.hasMeasuredDays ? String(format: "%.2f%% uptime", timeline.uptimePercent) : "No data")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text("Today")
-                                .font(.system(size: 9))
-                                .foregroundStyle(.tertiary)
-                        }
+                        UptimeBarWithLabels(timeline: timeline)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -139,15 +127,15 @@ struct GroupedComponentSectionView: View {
 
             if isExpanded {
                 VStack(spacing: 0) {
-                    ForEach(section.components) { component in
+                    ForEach(Array(section.components.enumerated()), id: \.element.id) { index, component in
                         ComponentUptimeRow(
                             component: component,
-                            timeline: store.timeline(for: .openAI, componentId: component.id),
+                            timeline: store.timeline(for: provider, componentId: component.id),
                             statusPageURL: statusPageURL,
                             contentPaddingLeading: 30
                         )
 
-                        if component.id != section.components.last?.id {
+                        if index < section.components.count - 1 {
                             Divider()
                                 .padding(.leading, 30)
                                 .padding(.trailing, 16)
@@ -180,24 +168,8 @@ struct ComponentUptimeRow: View {
                     .foregroundStyle(component.status.color)
             }
 
-            // Uptime bar
             if let timeline {
-                UptimeBarView(timeline: timeline, height: UptimeBarStyle.height)
-
-                // Labels
-                HStack {
-                    Text("90 days ago")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
-                    Spacer()
-                    Text(timeline.hasMeasuredDays ? String(format: "%.2f%% uptime", timeline.uptimePercent) : "No data")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text("Today")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.tertiary)
-                }
+                UptimeBarWithLabels(timeline: timeline)
             }
         }
         .padding(.leading, contentPaddingLeading)
@@ -206,6 +178,32 @@ struct ComponentUptimeRow: View {
         .contentShape(Rectangle())
         .onTapGesture {
             NSWorkspace.shared.open(statusPageURL)
+        }
+    }
+}
+
+// MARK: - Uptime Bar
+
+struct UptimeBarWithLabels: View {
+    let timeline: ComponentTimeline
+
+    var body: some View {
+        VStack(spacing: 0) {
+            UptimeBarView(timeline: timeline, height: UptimeBarStyle.height)
+
+            HStack {
+                Text("90 days ago")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Text(timeline.hasMeasuredDays ? String(format: "%.2f%% uptime", timeline.uptimePercent) : "No data")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("Today")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.tertiary)
+            }
         }
     }
 }
@@ -232,22 +230,26 @@ struct UptimeBarView: View {
 struct IncidentRow: View {
     let incident: Incident
 
+    private var impact: StatusIndicator {
+        incident.impact ?? .minor
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 10))
-                    .foregroundStyle(impactColor(incident.impact ?? "minor"))
+                    .foregroundStyle(impact.impactColor)
                 Text(incident.name)
                     .font(.system(size: 12, weight: .medium))
                 Spacer()
-                if let impact = incident.impact {
-                    Text(impact.uppercased())
+                if incident.impact != nil {
+                    Text(impact.impactLabel.uppercased())
                         .font(.system(size: 9, weight: .bold))
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
-                        .background(impactColor(impact).opacity(0.15))
-                        .foregroundStyle(impactColor(impact))
+                        .background(impact.impactColor.opacity(0.15))
+                        .foregroundStyle(impact.impactColor)
                         .clipShape(RoundedRectangle(cornerRadius: 3))
                 }
             }
@@ -262,14 +264,5 @@ struct IncidentRow: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 4)
-    }
-
-    private func impactColor(_ impact: String) -> Color {
-        switch impact {
-        case "critical": .red
-        case "major": .orange
-        case "minor": .yellow
-        default: .secondary
-        }
     }
 }

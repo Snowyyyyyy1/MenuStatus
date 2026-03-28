@@ -4,6 +4,11 @@
 .build/
 Derived/
 .swiftpm/
+dist/
+appcast/
+
+# Tuist dependencies
+Tuist/.build/
 
 # Tuist-generated Xcode files
 *.xcodeproj/
