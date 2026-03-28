@@ -15,6 +15,7 @@ struct StatusPage: Codable {
     let id: String
     let name: String
     let url: String
+    let timeZone: String?
     let updatedAt: String?
 }
 
@@ -80,6 +81,7 @@ struct Component: Codable, Identifiable {
     let status: ComponentStatus
     let position: Int?
     let description: String?
+    let startDate: String?
     let groupId: String?
     let group: Bool?
     let onlyShowIfDegraded: Bool?
@@ -137,8 +139,11 @@ struct Incident: Codable, Identifiable {
     let status: String
     let impact: String?
     let shortlink: String?
+    let startedAt: String?
     let createdAt: String?
     let updatedAt: String?
+    let monitoringAt: String?
+    let resolvedAt: String?
     let incidentUpdates: [IncidentUpdate]?
     let components: [IncidentComponent]?
 }
@@ -146,6 +151,7 @@ struct Incident: Codable, Identifiable {
 struct IncidentComponent: Codable {
     let id: String
     let name: String?
+    let status: ComponentStatus?
 }
 
 struct IncidentUpdate: Codable, Identifiable {
@@ -161,12 +167,6 @@ struct AffectedComponent: Codable {
     let name: String
     let oldStatus: String
     let newStatus: String
-}
-
-// MARK: - Incidents Response
-
-struct IncidentsResponse: Codable {
-    let incidents: [Incident]
 }
 
 // MARK: - Daily Uptime
@@ -188,6 +188,7 @@ struct DayStatus: Identifiable {
 }
 
 enum TimelineDayLevel: Int, Comparable {
+    case noData
     case operational
     case degraded
     case maintenance
@@ -196,6 +197,7 @@ enum TimelineDayLevel: Int, Comparable {
 
     var color: Color {
         switch self {
+        case .noData: .gray.opacity(0.45)
         case .operational: .green
         case .degraded: .yellow
         case .maintenance: .blue
@@ -206,6 +208,7 @@ enum TimelineDayLevel: Int, Comparable {
 
     var displayName: String {
         switch self {
+        case .noData: "no data"
         case .operational: "operational"
         case .degraded: "degraded"
         case .maintenance: "maintenance"
@@ -225,69 +228,85 @@ struct ComponentTimeline {
     let days: [DayStatus]
     let uptimePercent: Double
 
-    static func build(incidents: [Incident], componentId: String, numDays: Int = 90) -> ComponentTimeline {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
+    var hasMeasuredDays: Bool {
+        days.contains { $0.level != .noData }
+    }
 
-        // Find incidents affecting this component
-        let relevant = incidents.filter { incident in
-            // Check incident-level components
-            if let comps = incident.components, comps.contains(where: { $0.id == componentId }) {
-                return true
-            }
-            // Check incident_updates affected_components
-            if let updates = incident.incidentUpdates {
-                for update in updates {
-                    if let affected = update.affectedComponents,
-                       affected.contains(where: { $0.code == componentId }) {
-                        return true
-                    }
-                }
-            }
-            return false
-        }
-
-        // Map days to worst impact
-        var dayImpacts: [Date: String] = [:]
-        for incident in relevant {
-            guard let created = parseISODate(incident.createdAt) else { continue }
-            let resolved = parseISODate(incident.updatedAt) ?? Date()
-            let start = calendar.startOfDay(for: created)
-            let end = calendar.startOfDay(for: resolved)
-
-            var day = start
-            while day <= end && day <= today {
-                let newImpact = incident.impact ?? "minor"
-                if severity(newImpact) > severity(dayImpacts[day] ?? "") {
-                    dayImpacts[day] = newImpact
-                }
-                guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
-                day = next
-            }
-        }
-
+    static func buildFromColors(
+        fills: [String],
+        now: Date,
+        timeZoneIdentifier: String?,
+        title: String,
+        uptimePercent: Double
+    ) -> ComponentTimeline {
+        let calendar = configuredCalendar(timeZoneIdentifier: timeZoneIdentifier)
+        let today = calendar.startOfDay(for: now)
         let formatter = DateFormatter()
+        formatter.calendar = calendar
         formatter.dateFormat = "M/d"
 
-        var affectedDays = 0
-        let days: [DayStatus] = (0..<numDays).reversed().map { offset in
-            let date = calendar.date(byAdding: .day, value: -offset, to: today)!
-            let label = formatter.string(from: date)
-
-            if let impact = dayImpacts[date] {
-                affectedDays += 1
-                let level: TimelineDayLevel = switch impact {
-                case "critical": .majorOutage
-                case "major": .partialOutage
-                default: .degraded
-                }
-                return DayStatus(date: date, level: level, tooltip: "\(label): \(impact)")
+        let days = fills.enumerated().compactMap { index, fill -> DayStatus? in
+            guard let date = calendar.date(byAdding: .day, value: -(fills.count - 1 - index), to: today) else {
+                return nil
             }
-            return DayStatus(date: date, level: .operational, tooltip: "\(label): operational")
+            let label = formatter.string(from: date)
+            let level = timelineLevel(forFillHex: fill)
+            return DayStatus(
+                date: date,
+                level: level,
+                tooltip: "\(label): \(title) \(level.displayName)"
+            )
         }
 
-        let uptime = Double(numDays - affectedDays) / Double(numDays) * 100.0
-        return ComponentTimeline(days: days, uptimePercent: uptime)
+        return ComponentTimeline(days: days, uptimePercent: uptimePercent)
+    }
+
+    static func buildUnavailable(
+        title: String,
+        now: Date,
+        timeZoneIdentifier: String?
+    ) -> ComponentTimeline {
+        let calendar = configuredCalendar(timeZoneIdentifier: timeZoneIdentifier)
+        let today = calendar.startOfDay(for: now)
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.dateFormat = "M/d"
+
+        let days: [DayStatus] = (0..<90).reversed().compactMap { offset in
+            guard let date = calendar.date(byAdding: .day, value: -offset, to: today) else {
+                return nil
+            }
+            let label = formatter.string(from: date)
+            return DayStatus(date: date, level: .noData, tooltip: "\(label): \(title) no data")
+        }
+
+        return ComponentTimeline(days: days, uptimePercent: 0)
+    }
+
+    static func build(
+        from officialComponent: OfficialHistoryComponent,
+        now: Date,
+        timeZoneIdentifier: String?
+    ) -> ComponentTimeline {
+        switch officialComponent.timelineSource {
+        case .impacts(let impacts):
+            buildFromImpacts(
+                impacts: impacts,
+                now: now,
+                uptimePercentOverride: officialComponent.uptimePercent,
+                title: officialComponent.name,
+                timeZoneIdentifier: timeZoneIdentifier,
+                availableSince: officialComponent.dataAvailableSince
+            )
+        case .colors(let fills):
+            buildFromColors(
+                fills: fills,
+                now: now,
+                timeZoneIdentifier: timeZoneIdentifier,
+                title: officialComponent.name,
+                uptimePercent: officialComponent.uptimePercent ?? 0
+            )
+        }
     }
 
     static func buildFromImpacts(
@@ -295,11 +314,15 @@ struct ComponentTimeline {
         now: Date,
         numDays: Int = 90,
         uptimePercentOverride: Double? = nil,
-        title: String
+        title: String,
+        timeZoneIdentifier: String? = nil,
+        availableSince: String? = nil
     ) -> ComponentTimeline {
-        let calendar = Calendar.current
+        let calendar = configuredCalendar(timeZoneIdentifier: timeZoneIdentifier)
         let today = calendar.startOfDay(for: now)
+        let availableDate = startOfDay(from: availableSince, calendar: calendar)
         let formatter = DateFormatter()
+        formatter.calendar = calendar
         formatter.dateFormat = "M/d"
 
         var dayImpacts: [Date: TimelineDayLevel] = [:]
@@ -323,6 +346,11 @@ struct ComponentTimeline {
         let days: [DayStatus] = (0..<numDays).reversed().map { offset in
             let date = calendar.date(byAdding: .day, value: -offset, to: today)!
             let label = formatter.string(from: date)
+
+            if let availableDate, date < availableDate {
+                return DayStatus(date: date, level: .noData, tooltip: "\(label): no data")
+            }
+
             let level = dayImpacts[date] ?? .operational
             return DayStatus(
                 date: date,
@@ -384,36 +412,65 @@ struct ComponentTimeline {
         return iso.date(from: s) ?? isoFallback.date(from: s)
     }
 
-    private static func severity(_ impact: String) -> Int {
-        switch impact {
-        case "critical": 3
-        case "major": 2
-        case "minor": 1
-        default: 0
+    private static func configuredCalendar(timeZoneIdentifier: String?) -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        if let timeZoneIdentifier,
+           let timeZone = TimeZone(identifier: timeZoneIdentifier) {
+            calendar.timeZone = timeZone
+        }
+        return calendar
+    }
+
+    private static func startOfDay(from startDate: String?, calendar: Calendar) -> Date? {
+        guard let startDate else { return nil }
+
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        guard let date = formatter.date(from: startDate) else { return nil }
+        return calendar.startOfDay(for: date)
+    }
+
+    private static func timelineLevel(forFillHex fill: String) -> TimelineDayLevel {
+        switch normalizedHex(fill) {
+        case "b0aea5":
+            return .noData
+        case "76ad2a":
+            return .operational
+        case "2c84db":
+            return .maintenance
+        default:
+            let (r, g, _) = rgbComponents(for: fill)
+            if r > 210 && g < 120 {
+                return .majorOutage
+            }
+            if r > 225 && g < 170 {
+                return .partialOutage
+            }
+            if r > 180 && g >= 120 {
+                return .degraded
+            }
+            return .operational
         }
     }
-}
 
-enum OpenAIGroupID: String, CaseIterable, Identifiable {
-    case apis
-    case chatGPT
-    case codex
-    case sora
-    case fedRAMP
-    case other
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .apis: "APIs"
-        case .chatGPT: "ChatGPT"
-        case .codex: "Codex"
-        case .sora: "Sora"
-        case .fedRAMP: "FedRAMP"
-        case .other: "Other"
-        }
+    private static func normalizedHex(_ fill: String) -> String {
+        fill.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "#", with: "")
+            .lowercased()
     }
+
+    private static func rgbComponents(for fill: String) -> (Int, Int, Int) {
+        let hex = normalizedHex(fill)
+        guard hex.count == 6, let value = Int(hex, radix: 16) else {
+            return (0, 0, 0)
+        }
+        return ((value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff)
+    }
+
 }
 
 struct GroupedComponentSection: Identifiable {
@@ -428,10 +485,53 @@ struct GroupedComponentSection: Identifiable {
     }
 }
 
-struct OpenAIOfficialHistoryPayload {
+struct OfficialHistorySnapshot {
     let generatedAt: Date?
-    let summary: OpenAIOfficialSummary
-    let data: OpenAIOfficialHistoryData
+    let groups: [OfficialHistoryGroup]
+    let componentsByID: [String: OfficialHistoryComponent]
+}
+
+struct OfficialHistoryGroup {
+    let id: String
+    let name: String
+    let hidden: Bool
+    let componentIDs: [String]
+    let uptimePercent: Double?
+}
+
+struct OfficialHistoryComponent {
+    let id: String
+    let name: String
+    let hidden: Bool
+    let displayUptime: Bool
+    let dataAvailableSince: String?
+    let uptimePercent: Double?
+    let timelineSource: OfficialTimelineSource
+}
+
+enum OfficialTimelineSource {
+    case impacts([OfficialComponentImpact])
+    case colors([String])
+}
+
+extension OfficialHistoryComponent {
+    var impacts: [OfficialComponentImpact] {
+        switch timelineSource {
+        case .impacts(let impacts):
+            return impacts
+        case .colors:
+            return []
+        }
+    }
+
+    var fills: [String] {
+        switch timelineSource {
+        case .impacts:
+            return []
+        case .colors(let fills):
+            return fills
+        }
+    }
 }
 
 struct OpenAIOfficialSummary: Decodable {

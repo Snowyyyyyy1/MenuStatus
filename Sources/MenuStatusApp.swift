@@ -2,7 +2,13 @@ import SwiftUI
 
 @main
 struct MenuStatusApp: App {
-    @State private var store = StatusStore()
+    @State private var store: StatusStore
+
+    init() {
+        let store = StatusStore()
+        store.startPolling()
+        _store = State(initialValue: store)
+    }
 
     var body: some Scene {
         MenuBarExtra {

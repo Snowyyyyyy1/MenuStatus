@@ -1,5 +1,9 @@
 import SwiftUI
 
+private enum UptimeBarStyle {
+    static let height: CGFloat = 22
+}
+
 // MARK: - Provider Section
 
 struct ProviderSectionView: View {
@@ -110,14 +114,14 @@ struct GroupedComponentSectionView: View {
                     }
 
                     if let timeline = section.timeline {
-                        UptimeBarView(timeline: timeline, height: 20)
+                        UptimeBarView(timeline: timeline, height: UptimeBarStyle.height)
 
                         HStack {
                             Text("90 days ago")
                                 .font(.system(size: 9))
                                 .foregroundStyle(.tertiary)
                             Spacer()
-                            Text(String(format: "%.2f%% uptime", timeline.uptimePercent))
+                            Text(timeline.hasMeasuredDays ? String(format: "%.2f%% uptime", timeline.uptimePercent) : "No data")
                                 .font(.system(size: 9, weight: .medium))
                                 .foregroundStyle(.secondary)
                             Spacer()
@@ -178,7 +182,7 @@ struct ComponentUptimeRow: View {
 
             // Uptime bar
             if let timeline {
-                UptimeBarView(timeline: timeline, height: 24)
+                UptimeBarView(timeline: timeline, height: UptimeBarStyle.height)
 
                 // Labels
                 HStack {
@@ -186,7 +190,7 @@ struct ComponentUptimeRow: View {
                         .font(.system(size: 9))
                         .foregroundStyle(.tertiary)
                     Spacer()
-                    Text(String(format: "%.2f%% uptime", timeline.uptimePercent))
+                    Text(timeline.hasMeasuredDays ? String(format: "%.2f%% uptime", timeline.uptimePercent) : "No data")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.secondary)
                     Spacer()

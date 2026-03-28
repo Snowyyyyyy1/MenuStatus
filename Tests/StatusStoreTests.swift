@@ -2,69 +2,6 @@ import XCTest
 @testable import MenuStatus
 
 final class StatusStoreTests: XCTestCase {
-    func testOpenAIFallbackGroupingMapsKnownComponentsIntoExpectedSections() {
-        let sections = StatusStore.buildFallbackOpenAISections(
-            summary: makeSummary(components: [
-                makeComponent(id: "api", name: "Fine-tuning"),
-                makeComponent(id: "chat", name: "GPTs"),
-                makeComponent(id: "codex", name: "CLI"),
-                makeComponent(id: "sora", name: "Sora"),
-                makeComponent(id: "other", name: "Login"),
-            ]),
-            timelines: [:]
-        )
-
-        XCTAssertEqual(sections.map(\.id), ["apis", "chatGPT", "codex", "sora", "other"])
-        XCTAssertEqual(sections.first(where: { $0.id == "apis" })?.components.map(\.name), ["Fine-tuning"])
-        XCTAssertEqual(sections.first(where: { $0.id == "chatGPT" })?.components.map(\.name), ["GPTs"])
-        XCTAssertEqual(sections.first(where: { $0.id == "codex" })?.components.map(\.name), ["CLI"])
-        XCTAssertEqual(sections.first(where: { $0.id == "sora" })?.components.map(\.name), ["Sora"])
-        XCTAssertEqual(sections.first(where: { $0.id == "other" })?.components.map(\.name), ["Login"])
-    }
-
-    func testUnknownComponentFallsBackToOther() {
-        let sections = StatusStore.buildFallbackOpenAISections(
-            summary: makeSummary(components: [
-                makeComponent(id: "unknown", name: "Realtime Widgets"),
-            ]),
-            timelines: [:]
-        )
-
-        XCTAssertEqual(sections.count, 1)
-        XCTAssertEqual(sections.first?.id, "other")
-        XCTAssertEqual(sections.first?.components.first?.name, "Realtime Widgets")
-    }
-
-    func testGroupedStatusUsesWorstChildStatus() {
-        let sections = StatusStore.buildFallbackOpenAISections(
-            summary: makeSummary(components: [
-                makeComponent(id: "healthy", name: "CLI", status: .operational),
-                makeComponent(id: "bad", name: "Codex API", status: .majorOutage),
-            ]),
-            timelines: [:]
-        )
-
-        XCTAssertEqual(sections.first?.id, "codex")
-        XCTAssertEqual(sections.first?.status, .majorOutage)
-    }
-
-    func testGroupedTimelineUsesWorstDayAndComputesUptime() throws {
-        let sections = StatusStore.buildFallbackOpenAISections(
-            summary: makeSummary(components: [
-                makeComponent(id: "a", name: "CLI"),
-                makeComponent(id: "b", name: "Codex API"),
-            ]),
-            timelines: [
-                "a": makeTimeline(levels: [.operational, .degraded, .operational]),
-                "b": makeTimeline(levels: [.operational, .operational, .majorOutage]),
-            ]
-        )
-
-        let timeline = try XCTUnwrap(sections.first?.timeline)
-        XCTAssertEqual(timeline.days.map(\.level), [.operational, .degraded, .majorOutage])
-        XCTAssertEqual(timeline.uptimePercent, (1.0 / 3.0) * 100.0, accuracy: 0.001)
-    }
-
     func testUnhealthyGroupsAutoExpandUntilUserOverridesThem() {
         let store = StatusStore()
         let unhealthySection = GroupedComponentSection(
@@ -90,18 +27,197 @@ final class StatusStoreTests: XCTestCase {
 
         let payload = try StatusClient.parseOpenAIOfficialHistoryHTML(Data(html.utf8))
 
-        XCTAssertEqual(payload.summary.structure.items.first?.group?.name, "APIs")
-        XCTAssertEqual(payload.summary.structure.items.first?.group?.components.first?.name, "Chat Completions")
-        XCTAssertEqual(payload.data.componentImpacts.first?.componentId, "comp-chat")
-        XCTAssertEqual(payload.data.componentUptimes.first?.uptimePercent, 99.99)
+        XCTAssertEqual(payload.groups.first?.name, "APIs")
+        XCTAssertEqual(payload.componentsByID["comp-chat"]?.name, "Chat Completions")
+        XCTAssertEqual(payload.componentsByID["comp-chat"]?.impacts.first?.componentId, "comp-chat")
+        XCTAssertEqual(payload.componentsByID["comp-chat"]?.uptimePercent, 99.99)
         let generatedAt = try XCTUnwrap(payload.generatedAt)
         XCTAssertEqual(generatedAt.timeIntervalSince1970, 1_774_631_095.68, accuracy: 0.01)
+    }
+
+    func testDerivePresentationStatePreservesExistingDerivedDataUntilInputsAreComplete() {
+        let existingTimeline = makeTimeline(levels: [.operational, .operational])
+        let existingSection = GroupedComponentSection(
+            id: "existing",
+            title: "Existing",
+            components: [makeComponent(id: "existing", name: "Existing")],
+            status: .operational,
+            timeline: existingTimeline
+        )
+
+        let derivedState = StatusStore.derivePresentationState(
+            summaries: [
+                .openAI: makeSummary(components: [
+                    makeComponent(id: "api", name: "Fine-tuning"),
+                ]),
+            ],
+            currentTimelines: [.openAI: ["existing": existingTimeline]],
+            currentSections: [.openAI: [existingSection]],
+            officialHistories: [:]
+        )
+
+        XCTAssertEqual(derivedState.timelines[.openAI]?["existing"]?.days.count, existingTimeline.days.count)
+        XCTAssertEqual(derivedState.sections[.openAI]?.map(\.id), ["existing"])
+    }
+
+    func testParseAnthropicOfficialHistoryHTMLExtractsComponentUptime() throws {
+        let html = """
+        <html>
+          <head>
+            <meta name="issued" content="1774685401">
+          </head>
+          <body>
+            <main>
+              <div data-component-id="claude">
+                <span class="name">claude.ai</span>
+                <div class="shared-partial uptime-90-days-wrapper">
+                  <svg class="availability-time-line-graphic">
+                    <rect fill="#76ad2a" class="uptime-day component-claude day-0" />
+                    <rect fill="#e04343" class="uptime-day component-claude day-1" />
+                  </svg>
+                  <span id="uptime-percent-claude"><var data-var="uptime-percent">98.95</var></span>
+                </div>
+              </div>
+              <div data-component-id="code">
+                <span class="name">Claude Code</span>
+                <div class="shared-partial uptime-90-days-wrapper">
+                  <svg class="availability-time-line-graphic">
+                    <rect fill="#76ad2a" class="uptime-day component-code day-0" />
+                    <rect fill="#76ad2a" class="uptime-day component-code day-1" />
+                  </svg>
+                  <span id="uptime-percent-code"><var data-var="uptime-percent">99.27</var></span>
+                </div>
+              </div>
+            </main>
+          </body>
+        </html>
+        """
+
+        let payload = try StatusClient.parseAnthropicOfficialHistoryHTML(Data(html.utf8))
+
+        XCTAssertEqual(payload.componentsByID["claude"]?.name, "claude.ai")
+        XCTAssertEqual(payload.componentsByID["claude"]?.uptimePercent, 98.95)
+        XCTAssertEqual(payload.componentsByID["claude"]?.fills, ["#76ad2a", "#e04343"])
+        XCTAssertEqual(payload.componentsByID["code"]?.uptimePercent, 99.27)
+        XCTAssertEqual(payload.generatedAt?.timeIntervalSince1970 ?? 0, 1_774_685_401, accuracy: 0.01)
+    }
+
+    func testBuildOfficialAnthropicTimelinesUsesOfficialPercentages() {
+        let summary = makeSummary(components: [
+            makeComponent(id: "claude", name: "claude.ai"),
+            makeComponent(id: "platform", name: "platform.claude.com (formerly console.anthropic.com)"),
+            makeComponent(id: "code", name: "Claude Code"),
+        ])
+        let officialHistory = OfficialHistorySnapshot(
+            generatedAt: nil,
+            groups: [],
+            componentsByID: [
+                "claude": OfficialHistoryComponent(id: "claude", name: "claude.ai", hidden: false, displayUptime: true, dataAvailableSince: nil, uptimePercent: 98.95, timelineSource: .colors(["#76ad2a"])),
+                "platform": OfficialHistoryComponent(id: "platform", name: "platform.claude.com (formerly console.anthropic.com)", hidden: false, displayUptime: true, dataAvailableSince: nil, uptimePercent: 99.31, timelineSource: .colors(["#76ad2a"])),
+                "code": OfficialHistoryComponent(id: "code", name: "Claude Code", hidden: false, displayUptime: true, dataAvailableSince: nil, uptimePercent: 99.27, timelineSource: .colors(["#76ad2a"])),
+            ]
+        )
+
+        let timelines = StatusStore.buildOfficialAnthropicTimelines(
+            snapshot: officialHistory,
+            summary: summary
+        )
+
+        XCTAssertEqual(timelines["claude"]?.uptimePercent ?? 0, 98.95, accuracy: 0.001)
+        XCTAssertEqual(timelines["platform"]?.uptimePercent ?? 0, 99.31, accuracy: 0.001)
+        XCTAssertEqual(timelines["code"]?.uptimePercent ?? 0, 99.27, accuracy: 0.001)
+    }
+
+    func testBuildOfficialAnthropicTimelinesUsesOfficialBarColors() {
+        let summary = StatuspageSummary(
+            page: StatusPage(id: "page", name: "Claude", url: "https://status.claude.com", timeZone: "Etc/UTC", updatedAt: nil),
+            status: OverallStatus(indicator: .none, description: "Operational"),
+            components: [makeComponent(id: "claude", name: "claude.ai")],
+            incidents: [],
+            scheduledMaintenances: []
+        )
+        let payload = OfficialHistorySnapshot(
+            generatedAt: Date(timeIntervalSince1970: 1774685401),
+            groups: [],
+            componentsByID: [
+                "claude": OfficialHistoryComponent(
+                    id: "claude",
+                    name: "claude.ai",
+                    hidden: false,
+                    displayUptime: true,
+                    dataAvailableSince: nil,
+                    uptimePercent: 98.95,
+                    timelineSource: .colors(["#76ad2a", "#e04343", "#B0AEA5"])
+                )
+            ]
+        )
+
+        let timeline = StatusStore.buildOfficialAnthropicTimelines(
+            snapshot: payload,
+            summary: summary
+        )["claude"]
+
+        XCTAssertEqual(timeline?.uptimePercent, 98.95)
+        XCTAssertEqual(
+            timeline?.days.map(\.level) ?? [],
+            [TimelineDayLevel.operational, .majorOutage, .noData]
+        )
+    }
+
+    func testBuildOfficialAnthropicTimelinesMarksMissingComponentAsUnavailable() {
+        let summary = StatuspageSummary(
+            page: StatusPage(id: "page", name: "Claude", url: "https://status.claude.com", timeZone: "Etc/UTC", updatedAt: nil),
+            status: OverallStatus(indicator: .none, description: "Operational"),
+            components: [makeComponent(id: "missing", name: "Missing")],
+            incidents: [],
+            scheduledMaintenances: []
+        )
+        let payload = OfficialHistorySnapshot(generatedAt: nil, groups: [], componentsByID: [:])
+
+        let timeline = StatusStore.buildOfficialAnthropicTimelines(
+            snapshot: payload,
+            summary: summary
+        )["missing"]
+
+        XCTAssertEqual(timeline?.days.allSatisfy { $0.level == TimelineDayLevel.noData }, true)
+        XCTAssertEqual(timeline?.hasMeasuredDays, false)
+    }
+
+    func testBuildFromImpactsUsesProvidedTimeZoneAndAvailabilityDate() throws {
+        let now = try XCTUnwrap(ComponentTimeline.parseISODate("2026-03-23T12:00:00Z"))
+        let impacts = [
+            OfficialComponentImpact(
+                componentId: "claude",
+                endAt: "2026-03-23T00:10:00Z",
+                startAt: "2026-03-22T23:50:00Z",
+                status: .fullOutage
+            )
+        ]
+
+        let utcTimeline = ComponentTimeline.buildFromImpacts(
+            impacts: impacts,
+            now: now,
+            numDays: 2,
+            title: "claude.ai",
+            timeZoneIdentifier: "Etc/UTC"
+        )
+        let availableTimeline = ComponentTimeline.buildFromImpacts(
+            impacts: [],
+            now: now,
+            numDays: 3,
+            title: "claude.ai",
+            timeZoneIdentifier: "Etc/UTC",
+            availableSince: "2026-03-22"
+        )
+
+        XCTAssertEqual(utcTimeline.days.map(\.level), [TimelineDayLevel.majorOutage, .majorOutage])
+        XCTAssertEqual(availableTimeline.days.map(\.level), [.noData, .operational, .operational])
     }
 }
 
 private func makeSummary(components: [Component]) -> StatuspageSummary {
     StatuspageSummary(
-        page: StatusPage(id: "page", name: "OpenAI", url: "https://status.openai.com", updatedAt: nil),
+        page: StatusPage(id: "page", name: "OpenAI", url: "https://status.openai.com", timeZone: nil, updatedAt: nil),
         status: OverallStatus(indicator: .none, description: "Operational"),
         components: components,
         incidents: [],
@@ -113,7 +229,8 @@ private func makeComponent(
     id: String,
     name: String,
     status: ComponentStatus = .operational,
-    position: Int? = nil
+    position: Int? = nil,
+    startDate: String? = nil
 ) -> Component {
     Component(
         id: id,
@@ -121,6 +238,7 @@ private func makeComponent(
         status: status,
         position: position,
         description: nil,
+        startDate: startDate,
         groupId: nil,
         group: nil,
         onlyShowIfDegraded: nil

@@ -16,14 +16,14 @@ enum Provider: String, CaseIterable, Hashable {
     var apiURL: URL {
         switch self {
         case .openAI: URL(string: "https://status.openai.com/api/v2/summary.json")!
-        case .anthropic: URL(string: "https://status.anthropic.com/api/v2/summary.json")!
+        case .anthropic: URL(string: "https://status.claude.com/api/v2/summary.json")!
         }
     }
 
     var statusPageURL: URL {
         switch self {
         case .openAI: URL(string: "https://status.openai.com")!
-        case .anthropic: URL(string: "https://status.anthropic.com")!
+        case .anthropic: URL(string: "https://status.claude.com")!
         }
     }
 }
@@ -38,25 +38,37 @@ struct StatusClient {
     }()
 
     static func fetchSummary(for provider: Provider) async throws -> StatuspageSummary {
-        let (data, _) = try await URLSession.shared.data(from: provider.apiURL)
+        let data = try await fetchData(from: provider.apiURL)
         return try decoder.decode(StatuspageSummary.self, from: data)
     }
 
-    static func fetchIncidents(for provider: Provider) async throws -> [Incident] {
-        let url = provider.apiURL
-            .deletingLastPathComponent()
-            .appendingPathComponent("incidents.json")
-        let (data, _) = try await URLSession.shared.data(from: url)
-        let response = try decoder.decode(IncidentsResponse.self, from: data)
-        return response.incidents
-    }
-
-    static func fetchOpenAIOfficialHistory() async throws -> OpenAIOfficialHistoryPayload {
-        let (data, _) = try await URLSession.shared.data(from: Provider.openAI.statusPageURL)
+    static func fetchOpenAIOfficialHistory() async throws -> OfficialHistorySnapshot {
+        let data = try await fetchData(from: Provider.openAI.statusPageURL)
         return try parseOpenAIOfficialHistoryHTML(data)
     }
 
-    static func parseOpenAIOfficialHistoryHTML(_ data: Data) throws -> OpenAIOfficialHistoryPayload {
+    static func fetchAnthropicOfficialHistory() async throws -> OfficialHistorySnapshot {
+        let data = try await fetchData(from: Provider.anthropic.statusPageURL)
+        return try parseAnthropicOfficialHistoryHTML(data)
+    }
+
+    static func validateHTTPResponse(_ response: URLResponse, for url: URL) throws {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw StatusClientTransportError.invalidResponse(url)
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            throw StatusClientTransportError.unsuccessfulStatusCode(url: url, statusCode: httpResponse.statusCode)
+        }
+    }
+
+    private static func fetchData(from url: URL) async throws -> Data {
+        let (data, response) = try await URLSession.shared.data(from: url)
+        try validateHTTPResponse(response, for: url)
+        return data
+    }
+
+    static func parseOpenAIOfficialHistoryHTML(_ data: Data) throws -> OfficialHistorySnapshot {
         guard let html = String(data: data, encoding: .utf8) else {
             throw OpenAIHistoryParseError.invalidHTML
         }
@@ -78,11 +90,23 @@ struct StatusClient {
         let historyData = try decoder.decode(OpenAIOfficialHistoryData.self, from: Data(dataJSON.utf8))
 
         let generatedAt = parseGeneratedAt(in: summaryBlock)
-        return OpenAIOfficialHistoryPayload(
+        return makeOfficialHistorySnapshot(
             generatedAt: generatedAt,
             summary: summary,
             data: historyData
         )
+    }
+
+    static func parseAnthropicOfficialHistoryHTML(_ data: Data) throws -> OfficialHistorySnapshot {
+        guard let html = String(data: data, encoding: .utf8) else {
+            throw AnthropicHistoryParseError.invalidHTML
+        }
+
+        let generatedAt = parseAnthropicGeneratedAt(in: html)
+        let componentBlocks = try extractAnthropicComponentBlocks(from: html)
+        let components = Dictionary(uniqueKeysWithValues: componentBlocks.map { ($0.id, $0) })
+
+        return OfficialHistorySnapshot(generatedAt: generatedAt, groups: [], componentsByID: components)
     }
 
     private static func parseGeneratedAt(in text: String) -> Date? {
@@ -98,6 +122,167 @@ struct StatusClient {
         }
 
         return parseISO(String(text[range]))
+    }
+
+    private static func parseAnthropicGeneratedAt(in html: String) -> Date? {
+        let pattern = #"<meta\s+name="issued"\s+content="([0-9]+)""#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(
+                in: html,
+                range: NSRange(html.startIndex..<html.endIndex, in: html)
+              ),
+              match.numberOfRanges > 1,
+              let range = Range(match.range(at: 1), in: html),
+              let issued = TimeInterval(html[range]) else {
+            return nil
+        }
+
+        return Date(timeIntervalSince1970: issued)
+    }
+
+    private static func makeOfficialHistorySnapshot(
+        generatedAt: Date?,
+        summary: OpenAIOfficialSummary,
+        data: OpenAIOfficialHistoryData
+    ) -> OfficialHistorySnapshot {
+        let groupedImpacts = data.impactsByComponentID
+        let uptimeByComponentID = data.uptimeByComponentID
+        let uptimeByGroupID = data.uptimeByGroupID
+        let groupEntries = summary.structure.items.compactMap(\.group)
+        let componentsByID = Dictionary(uniqueKeysWithValues: groupEntries.flatMap { group in
+            group.components.map { ($0.componentId, $0) }
+        })
+
+        let groups = groupEntries.map { group in
+            return OfficialHistoryGroup(
+                id: group.id,
+                name: group.name,
+                hidden: group.hidden,
+                componentIDs: group.components.map(\.componentId),
+                uptimePercent: uptimeByGroupID[group.id]
+            )
+        }
+
+        let mappedComponents = Dictionary(uniqueKeysWithValues: groups.flatMap { group in
+            group.componentIDs.compactMap { componentID -> (String, OfficialHistoryComponent)? in
+                guard let component = componentsByID[componentID] else {
+                    return nil
+                }
+
+                let officialComponent = OfficialHistoryComponent(
+                    id: component.componentId,
+                    name: component.name,
+                    hidden: component.hidden,
+                    displayUptime: component.displayUptime ?? true,
+                    dataAvailableSince: component.dataAvailableSince,
+                    uptimePercent: uptimeByComponentID[component.componentId],
+                    timelineSource: .impacts(groupedImpacts[component.componentId] ?? [])
+                )
+                return (componentID, officialComponent)
+            }
+        })
+
+        return OfficialHistorySnapshot(generatedAt: generatedAt, groups: groups, componentsByID: mappedComponents)
+    }
+
+    private static func extractAnthropicComponentBlocks(from html: String) throws -> [OfficialHistoryComponent] {
+        let marker = #"<div data-component-id=""#
+        let componentRanges = allRanges(of: marker, in: html)
+
+        return componentRanges.enumerated().compactMap { index, startIndex in
+            let endIndex = index + 1 < componentRanges.count ? componentRanges[index + 1] : html.endIndex
+            let block = String(html[startIndex..<endIndex])
+            return parseAnthropicComponentBlock(block)
+        }
+    }
+
+    private static func parseAnthropicComponentBlock(_ html: String) -> OfficialHistoryComponent? {
+        guard let componentId = firstMatch(in: html, pattern: #"<div\s+data-component-id="([^"]+)""#, group: 1),
+              let name = firstMatch(in: html, pattern: #"<span class="name">\s*(.*?)\s*</span>"#, group: 1),
+              let svg = firstMatch(
+                in: html,
+                pattern: #"<svg class="availability-time-line-graphic".*?>(.*?)</svg>"#,
+                group: 1,
+                options: [.dotMatchesLineSeparators]
+              ),
+              let uptimeString = firstMatch(
+                in: html,
+                pattern: #"<span id="uptime-percent-[^"]+">\s*<var data-var="uptime-percent">([0-9]+(?:\.[0-9]+)?)</var>"#,
+                group: 1
+              ),
+              let uptimePercent = Double(uptimeString) else {
+            return nil
+        }
+
+        let fills = extractAnthropicFills(from: svg)
+        guard !fills.isEmpty else { return nil }
+
+        return OfficialHistoryComponent(
+            id: componentId,
+            name: decodeHTML(name.trimmingCharacters(in: .whitespacesAndNewlines)),
+            hidden: false,
+            displayUptime: true,
+            dataAvailableSince: nil,
+            uptimePercent: uptimePercent,
+            timelineSource: .colors(fills)
+        )
+    }
+
+    private static func extractAnthropicFills(from svg: String) -> [String] {
+        let pattern = #"<rect[^>]*\bfill="(#[0-9A-Fa-f]{6})"[^>]*class="[^"]*\buptime-day\b[^"]*\bday-([0-9]+)\b[^"]*"[^>]*/?>"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(svg.startIndex..<svg.endIndex, in: svg)
+
+        let indexedFills: [(Int, String)] = regex.matches(in: svg, options: [], range: range).compactMap { match in
+            guard match.numberOfRanges == 3,
+                  let fillRange = Range(match.range(at: 1), in: svg),
+                  let dayRange = Range(match.range(at: 2), in: svg),
+                  let day = Int(svg[dayRange]) else {
+                return nil
+            }
+            return (day, String(svg[fillRange]))
+        }
+
+        return indexedFills.sorted { $0.0 < $1.0 }.map(\.1)
+    }
+
+    private static func decodeHTML(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+    }
+
+    private static func allRanges(of needle: String, in text: String) -> [String.Index] {
+        var positions: [String.Index] = []
+        var searchStart = text.startIndex
+
+        while let range = text.range(of: needle, range: searchStart..<text.endIndex) {
+            positions.append(range.lowerBound)
+            searchStart = range.upperBound
+        }
+
+        return positions
+    }
+
+    private static func firstMatch(
+        in text: String,
+        pattern: String,
+        group: Int,
+        options: NSRegularExpression.Options = [.caseInsensitive]
+    ) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: options),
+              let match = regex.firstMatch(
+                in: text,
+                range: NSRange(text.startIndex..<text.endIndex, in: text)
+              ),
+              match.numberOfRanges > group,
+              let range = Range(match.range(at: group), in: text) else {
+            return nil
+        }
+
+        return String(text[range])
     }
 
     private static func extractDecodedNextBlocks(from html: String) throws -> [String] {
@@ -197,4 +382,22 @@ enum OpenAIHistoryParseError: Error {
     case missingMarker(String)
     case missingObjectAfterMarker(String)
     case unterminatedObject(String)
+}
+
+enum AnthropicHistoryParseError: Error {
+    case invalidHTML
+}
+
+enum StatusClientTransportError: LocalizedError, Equatable {
+    case invalidResponse(URL)
+    case unsuccessfulStatusCode(url: URL, statusCode: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidResponse(let url):
+            return "Invalid HTTP response from \(url.absoluteString)"
+        case .unsuccessfulStatusCode(let url, let statusCode):
+            return "HTTP \(statusCode) from \(url.absoluteString)"
+        }
+    }
 }
