@@ -14,6 +14,8 @@ Derived/
 *.xcuserdata/
 
 # Local editor and agent state
+AGENTS.md
+agents.md
 .agent/
 .agents/
 .claude/
