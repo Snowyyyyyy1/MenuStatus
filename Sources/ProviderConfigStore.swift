@@ -26,9 +26,13 @@ final class ProviderConfigStore {
         saveToDisk()
     }
 
-    func removeProvider(id: String) {
+    func removeProvider(id: String, settings: SettingsStore) {
         guard providers.first(where: { $0.id == id })?.isBuiltIn != true else { return }
+        let enabledCount = providers.filter { settings.isEnabled($0) }.count
+        let isEnabled = !settings.disabledProviderIDs.contains(id)
+        guard !isEnabled || enabledCount > 1 else { return }
         providers.removeAll { $0.id == id }
+        settings.disabledProviderIDs.remove(id)
         saveToDisk()
     }
 
@@ -68,6 +72,7 @@ final class ProviderConfigStore {
     }
 
     struct ExportEntry: Codable {
+        let id: String?
         let name: String
         let url: String
         let platform: StatusPlatform?
@@ -75,7 +80,7 @@ final class ProviderConfigStore {
 
     func exportJSON() throws -> Data {
         let entries = providers.filter { !$0.isBuiltIn }.map {
-            ExportEntry(name: $0.displayName, url: $0.baseURL.absoluteString, platform: $0.platform)
+            ExportEntry(id: $0.id, name: $0.displayName, url: $0.baseURL.absoluteString, platform: $0.platform)
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -89,10 +94,9 @@ final class ProviderConfigStore {
         for entry in decoded.providers {
             guard let url = URL(string: entry.url) else { continue }
             let config: ProviderConfig
-            if let platform = entry.platform {
+            if let id = entry.id, let platform = entry.platform {
                 config = ProviderConfig(
-                    id: url.host ?? entry.name.lowercased(),
-                    displayName: entry.name,
+                    id: id, displayName: entry.name,
                     baseURL: url, platform: platform, isBuiltIn: false
                 )
             } else {

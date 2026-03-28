@@ -37,7 +37,7 @@ struct SettingsView: View {
                         if !provider.isBuiltIn {
                             Spacer()
                             Button {
-                                settings.providerConfigs.removeProvider(id: provider.id)
+                                settings.providerConfigs.removeProvider(id: provider.id, settings: settings)
                             } label: {
                                 Image(systemName: "trash")
                                     .foregroundStyle(.red)

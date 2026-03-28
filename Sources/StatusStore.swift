@@ -64,8 +64,9 @@ final class StatusStore {
         isLoading = true
         errorMessage = nil
 
-        var stagedSummaries = summaries
         let activeProviders = settings.providerConfigs.enabledProviders(settings: settings)
+        let activeSet = Set(activeProviders)
+        var stagedSummaries = summaries.filter { activeSet.contains($0.key) }
 
         enum FetchResult {
             case summary(ProviderConfig, Result<StatuspageSummary, Error>)
@@ -115,8 +116,8 @@ final class StatusStore {
             let derivedState = Self.derivePresentationState(
                 providers: activeProviders,
                 summaries: stagedSummaries,
-                currentTimelines: componentTimelines,
-                currentSections: groupedSections,
+                currentTimelines: componentTimelines.filter { activeSet.contains($0.key) },
+                currentSections: groupedSections.filter { activeSet.contains($0.key) },
                 officialHistories: officialHistories
             )
 
