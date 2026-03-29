@@ -21,6 +21,8 @@ Tuist/.build/
 # Local editor and agent state
 AGENTS.md
 agents.md
+CLAUDE.md
+claude.md
 .agent/
 .agents/
 .claude/

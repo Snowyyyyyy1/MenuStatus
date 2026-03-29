@@ -17,6 +17,7 @@ let project = Project(
             sources: ["Sources/**"],
             dependencies: [
                 .external(name: "Sparkle"),
+                .external(name: "MenuBarExtraAccess"),
             ]
         ),
         .target(

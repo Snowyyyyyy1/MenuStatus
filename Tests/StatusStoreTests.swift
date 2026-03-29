@@ -117,7 +117,8 @@ final class StatusStoreTests: XCTestCase {
                 "claude": OfficialHistoryComponent(id: "claude", name: "claude.ai", hidden: false, displayUptime: true, dataAvailableSince: nil, uptimePercent: 98.95, timelineSource: .colors(["#76ad2a"])),
                 "platform": OfficialHistoryComponent(id: "platform", name: "platform.claude.com (formerly console.anthropic.com)", hidden: false, displayUptime: true, dataAvailableSince: nil, uptimePercent: 99.31, timelineSource: .colors(["#76ad2a"])),
                 "code": OfficialHistoryComponent(id: "code", name: "Claude Code", hidden: false, displayUptime: true, dataAvailableSince: nil, uptimePercent: 99.27, timelineSource: .colors(["#76ad2a"])),
-            ]
+            ],
+            incidentNames: [:]
         )
 
         let timelines = StatusStore.buildFlatTimelines(
@@ -151,7 +152,8 @@ final class StatusStoreTests: XCTestCase {
                     uptimePercent: 98.95,
                     timelineSource: .colors(["#76ad2a", "#e04343", "#B0AEA5"])
                 )
-            ]
+            ],
+            incidentNames: [:]
         )
 
         let timeline = StatusStore.buildFlatTimelines(
@@ -174,7 +176,7 @@ final class StatusStoreTests: XCTestCase {
             incidents: [],
             scheduledMaintenances: []
         )
-        let payload = OfficialHistorySnapshot(generatedAt: nil, groups: [], componentsByID: [:])
+        let payload = OfficialHistorySnapshot(generatedAt: nil, groups: [], componentsByID: [:], incidentNames: [:])
 
         let timeline = StatusStore.buildFlatTimelines(
             snapshot: payload,
@@ -192,7 +194,8 @@ final class StatusStoreTests: XCTestCase {
                 componentId: "claude",
                 endAt: "2026-03-23T00:10:00Z",
                 startAt: "2026-03-22T23:50:00Z",
-                status: .fullOutage
+                status: .fullOutage,
+                statusPageIncidentId: nil
             )
         ]
 

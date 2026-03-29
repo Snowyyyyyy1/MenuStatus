@@ -14,11 +14,43 @@ struct StatusClient {
         return try decoder.decode(StatuspageSummary.self, from: data)
     }
 
+    static func fetchIncidents(for provider: ProviderConfig) async throws -> [Incident] {
+        var components = URLComponents(url: provider.baseURL.appendingPathComponent("api/v2/incidents.json"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "per_page", value: "100")]
+        let data = try await fetchData(from: components.url!)
+        let response = try decoder.decode(IncidentHistoryResponse.self, from: data)
+        return response.incidents
+    }
+
+    static func fetchScheduledMaintenances(for provider: ProviderConfig) async throws -> [Incident] {
+        let url = provider.baseURL.appendingPathComponent("api/v2/scheduled-maintenances.json")
+        let data = try await fetchData(from: url)
+        let response = try decoder.decode(ScheduledMaintenancesResponse.self, from: data)
+        return response.scheduledMaintenances
+    }
+
+    static func fetchHistoryPageIncidents(for provider: ProviderConfig) async throws -> [HistoryPageIncident] {
+        guard provider.platform == .atlassianStatuspage else { return [] }
+        let data = try await fetchData(from: provider.statusPageURL.appendingPathComponent("history"))
+        return parseAtlassianHistoryPage(data)
+    }
+
     static func fetchOfficialHistory(for provider: ProviderConfig) async throws -> OfficialHistorySnapshot {
         let data = try await fetchData(from: provider.statusPageURL)
         switch provider.platform {
         case .incidentIO:
-            return try parseIncidentIOHistoryHTML(data)
+            var snapshot = try parseIncidentIOHistoryHTML(data)
+            // Fetch /history for incident names
+            if let historyData = try? await fetchData(from: provider.statusPageURL.appendingPathComponent("history")),
+               let names = try? parseIncidentIOIncidentNames(historyData) {
+                snapshot = OfficialHistorySnapshot(
+                    generatedAt: snapshot.generatedAt,
+                    groups: snapshot.groups,
+                    componentsByID: snapshot.componentsByID,
+                    incidentNames: names
+                )
+            }
+            return snapshot
         case .atlassianStatuspage:
             return try parseAtlassianStatuspageHistoryHTML(data)
         }
@@ -78,7 +110,32 @@ struct StatusClient {
         let componentBlocks = try extractStatuspageComponentBlocks(from: html)
         let components = Dictionary(uniqueKeysWithValues: componentBlocks.map { ($0.id, $0) })
 
-        return OfficialHistorySnapshot(generatedAt: generatedAt, groups: [], componentsByID: components)
+        return OfficialHistorySnapshot(generatedAt: generatedAt, groups: [], componentsByID: components, incidentNames: [:])
+    }
+
+    static func parseIncidentIOIncidentNames(_ data: Data) throws -> [String: String] {
+        guard let html = String(data: data, encoding: .utf8) else { return [:] }
+        let decodedBlocks = (try? extractDecodedNextBlocks(from: html)) ?? []
+
+        var names: [String: String] = [:]
+        for block in decodedBlocks {
+            // Find incident objects with "id" and "name" fields
+            let pattern = #""id":"([^"]+)"[^}]*?"name":"([^"]+)""#
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else { continue }
+            let range = NSRange(block.startIndex..<block.endIndex, in: block)
+            for match in regex.matches(in: block, range: range) {
+                guard match.numberOfRanges == 3,
+                      let idRange = Range(match.range(at: 1), in: block),
+                      let nameRange = Range(match.range(at: 2), in: block) else { continue }
+                let id = String(block[idRange])
+                let name = String(block[nameRange])
+                // Only store incident-like IDs (not component/group IDs)
+                if id.count > 20 {
+                    names[id] = name
+                }
+            }
+        }
+        return names
     }
 
     private static func parseGeneratedAt(in text: String) -> Date? {
@@ -154,7 +211,7 @@ struct StatusClient {
             }
         })
 
-        return OfficialHistorySnapshot(generatedAt: generatedAt, groups: groups, componentsByID: mappedComponents)
+        return OfficialHistorySnapshot(generatedAt: generatedAt, groups: groups, componentsByID: mappedComponents, incidentNames: [:])
     }
 
     private static func extractStatuspageComponentBlocks(from html: String) throws -> [OfficialHistoryComponent] {
@@ -328,6 +385,122 @@ struct StatusClient {
 
     private static func sanitizeEmbeddedJSON(_ json: String) -> String {
         json.replacingOccurrences(of: #""$undefined""#, with: "null")
+    }
+
+    static func parseAtlassianHistoryPage(_ data: Data) -> [HistoryPageIncident] {
+        guard let html = String(data: data, encoding: .utf8) else { return [] }
+
+        // Extract data-react-props JSON
+        let propsPattern = #"data-react-props="([^"]*)"#
+        guard let propsRegex = try? NSRegularExpression(pattern: propsPattern),
+              let propsMatch = propsRegex.firstMatch(
+                in: html,
+                range: NSRange(html.startIndex..<html.endIndex, in: html)
+              ),
+              let propsRange = Range(propsMatch.range(at: 1), in: html) else {
+            return []
+        }
+
+        let escaped = String(html[propsRange])
+        let unescaped = decodeHTML(escaped)
+        guard let propsData = unescaped.data(using: .utf8),
+              let props = try? JSONSerialization.jsonObject(with: propsData) as? [String: Any],
+              let months = props["months"] as? [[String: Any]] else {
+            return []
+        }
+
+        let calendar = Calendar(identifier: .gregorian)
+        let dateFormatter = DateFormatter()
+        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
+        dateFormatter.timeZone = TimeZone(identifier: "UTC")
+
+        let monthNames = ["January": 1, "February": 2, "March": 3, "April": 4,
+                          "May": 5, "June": 6, "July": 7, "August": 8,
+                          "September": 9, "October": 10, "November": 11, "December": 12]
+
+        var results: [HistoryPageIncident] = []
+
+        for month in months {
+            guard let monthName = month["name"] as? String,
+                  let year = month["year"] as? Int,
+                  let monthNum = monthNames[monthName],
+                  let incidents = month["incidents"] as? [[String: Any]] else { continue }
+
+            for inc in incidents {
+                guard let code = inc["code"] as? String,
+                      let name = inc["name"] as? String,
+                      let timestamp = inc["timestamp"] as? String else { continue }
+
+                let impactStr = inc["impact"] as? String
+                let impact = impactStr.flatMap { StatusIndicator(rawValue: $0) }
+
+                // Parse day from: "Mar <var data-var='date'>29</var>, ..."
+                let dayPattern = #"data-var='date'>(\d+)</var>"#
+                guard let dayRegex = try? NSRegularExpression(pattern: dayPattern),
+                      let dayMatch = dayRegex.firstMatch(
+                        in: timestamp,
+                        range: NSRange(timestamp.startIndex..<timestamp.endIndex, in: timestamp)
+                      ),
+                      let dayRange = Range(dayMatch.range(at: 1), in: timestamp),
+                      let day = Int(timestamp[dayRange]) else { continue }
+
+                // Parse times from: "<var data-var='time'>00:53</var> - <var data-var='time'>04:44</var>"
+                let timePattern = #"data-var='time'>(\d{2}:\d{2})</var>"#
+                let timeRegex = (try? NSRegularExpression(pattern: timePattern)) ?? NSRegularExpression()
+                let timeMatches = timeRegex.matches(
+                    in: timestamp,
+                    range: NSRange(timestamp.startIndex..<timestamp.endIndex, in: timestamp)
+                )
+
+                var comps = DateComponents()
+                comps.year = year
+                comps.month = monthNum
+                comps.day = day
+                comps.timeZone = TimeZone(identifier: "UTC")
+
+                guard let baseDate = calendar.date(from: comps) else { continue }
+
+                var startDate = baseDate
+                var endDate = baseDate.addingTimeInterval(3600) // default 1 hour
+
+                if timeMatches.count >= 2,
+                   let startRange = Range(timeMatches[0].range(at: 1), in: timestamp),
+                   let endRange = Range(timeMatches[1].range(at: 1), in: timestamp) {
+                    let startTime = String(timestamp[startRange])
+                    let endTime = String(timestamp[endRange])
+                    let startParts = startTime.split(separator: ":").compactMap { Int($0) }
+                    let endParts = endTime.split(separator: ":").compactMap { Int($0) }
+                    if startParts.count == 2 {
+                        startDate = baseDate.addingTimeInterval(TimeInterval(startParts[0] * 3600 + startParts[1] * 60))
+                    }
+                    if endParts.count == 2 {
+                        var endOffset = TimeInterval(endParts[0] * 3600 + endParts[1] * 60)
+                        if endOffset <= TimeInterval(startParts[0] * 3600 + startParts[1] * 60) {
+                            endOffset += 86400 // crossed midnight
+                        }
+                        endDate = baseDate.addingTimeInterval(endOffset)
+                    }
+                } else if timeMatches.count == 1,
+                          let startRange = Range(timeMatches[0].range(at: 1), in: timestamp) {
+                    let startTime = String(timestamp[startRange])
+                    let parts = startTime.split(separator: ":").compactMap { Int($0) }
+                    if parts.count == 2 {
+                        startDate = baseDate.addingTimeInterval(TimeInterval(parts[0] * 3600 + parts[1] * 60))
+                        endDate = startDate.addingTimeInterval(3600)
+                    }
+                }
+
+                results.append(HistoryPageIncident(
+                    code: code,
+                    name: name,
+                    impact: impact,
+                    startedAt: startDate,
+                    resolvedAt: endDate
+                ))
+            }
+        }
+
+        return results
     }
 
     private static func parseISO(_ value: String) -> Date? {

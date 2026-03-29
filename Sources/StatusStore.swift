@@ -6,6 +6,7 @@ final class StatusStore {
     var summaries: [ProviderConfig: StatuspageSummary] = [:]
     var componentTimelines: [ProviderConfig: [String: ComponentTimeline]] = [:]
     var groupedSections: [ProviderConfig: [GroupedComponentSection]] = [:]
+    var incidentLookup: [ProviderConfig: [String: [Date: [DayIncidentDetail]]]] = [:]
     var lastRefreshed: Date?
     var isLoading = false
     var errorMessage: String?
@@ -71,6 +72,9 @@ final class StatusStore {
         enum FetchResult {
             case summary(ProviderConfig, Result<StatuspageSummary, Error>)
             case officialHistory(ProviderConfig, Result<OfficialHistorySnapshot, Error>)
+            case incidents(ProviderConfig, Result<[Incident], Error>)
+            case maintenances(ProviderConfig, Result<[Incident], Error>)
+            case historyPage(ProviderConfig, Result<[HistoryPageIncident], Error>)
         }
 
         await withTaskGroup(of: FetchResult.self) { group in
@@ -92,10 +96,42 @@ final class StatusStore {
                         return .officialHistory(provider, .failure(error))
                     }
                 }
+
+                group.addTask {
+                    do {
+                        let incidents = try await StatusClient.fetchIncidents(for: provider)
+                        return .incidents(provider, .success(incidents))
+                    } catch {
+                        return .incidents(provider, .failure(error))
+                    }
+                }
+
+                if provider.platform == .atlassianStatuspage {
+                    group.addTask {
+                        do {
+                            let maintenances = try await StatusClient.fetchScheduledMaintenances(for: provider)
+                            return .maintenances(provider, .success(maintenances))
+                        } catch {
+                            return .maintenances(provider, .failure(error))
+                        }
+                    }
+
+                    group.addTask {
+                        do {
+                            let historyIncidents = try await StatusClient.fetchHistoryPageIncidents(for: provider)
+                            return .historyPage(provider, .success(historyIncidents))
+                        } catch {
+                            return .historyPage(provider, .failure(error))
+                        }
+                    }
+                }
             }
 
             var errors: [String] = []
             var officialHistories: [ProviderConfig: OfficialHistorySnapshot] = [:]
+            var fetchedIncidents: [ProviderConfig: [Incident]] = [:]
+            var fetchedMaintenances: [ProviderConfig: [Incident]] = [:]
+            var fetchedHistoryPage: [ProviderConfig: [HistoryPageIncident]] = [:]
             for await result in group {
                 switch result {
                 case .summary(let provider, .success(let summary)):
@@ -105,6 +141,18 @@ final class StatusStore {
                 case .officialHistory(let provider, .success(let history)):
                     officialHistories[provider] = history
                 case .officialHistory(_, .failure):
+                    break
+                case .incidents(let provider, .success(let incidents)):
+                    fetchedIncidents[provider] = incidents
+                case .incidents(_, .failure):
+                    break
+                case .maintenances(let provider, .success(let maintenances)):
+                    fetchedMaintenances[provider] = maintenances
+                case .maintenances(_, .failure):
+                    break
+                case .historyPage(let provider, .success(let historyIncidents)):
+                    fetchedHistoryPage[provider] = historyIncidents
+                case .historyPage(_, .failure):
                     break
                 }
             }
@@ -124,10 +172,177 @@ final class StatusStore {
             summaries = stagedSummaries
             componentTimelines = derivedState.timelines
             groupedSections = derivedState.sections
+            incidentLookup = Self.buildIncidentLookup(
+                providers: activeProviders,
+                incidents: fetchedIncidents,
+                maintenances: fetchedMaintenances,
+                historyPageIncidents: fetchedHistoryPage,
+                officialHistories: officialHistories,
+                summaries: stagedSummaries
+            )
         }
 
         lastRefreshed = Date()
         isLoading = false
+    }
+
+    func dayDetails(for provider: ProviderConfig, componentId: String) -> [Date: [DayIncidentDetail]] {
+        incidentLookup[provider]?[componentId] ?? [:]
+    }
+
+    func dayDetails(for provider: ProviderConfig, section: GroupedComponentSection) -> [Date: [DayIncidentDetail]] {
+        var merged: [Date: [DayIncidentDetail]] = [:]
+        for component in section.components {
+            if let componentDetails = incidentLookup[provider]?[component.id] {
+                for (date, details) in componentDetails {
+                    merged[date, default: []].append(contentsOf: details)
+                }
+            }
+        }
+        return merged
+    }
+}
+
+// MARK: - Incident Lookup
+
+extension StatusStore {
+    static func buildIncidentLookup(
+        providers: [ProviderConfig],
+        incidents: [ProviderConfig: [Incident]],
+        maintenances: [ProviderConfig: [Incident]] = [:],
+        historyPageIncidents: [ProviderConfig: [HistoryPageIncident]] = [:],
+        officialHistories: [ProviderConfig: OfficialHistorySnapshot],
+        summaries: [ProviderConfig: StatuspageSummary]
+    ) -> [ProviderConfig: [String: [Date: [DayIncidentDetail]]]] {
+        var result: [ProviderConfig: [String: [Date: [DayIncidentDetail]]]] = [:]
+
+        for provider in providers {
+            let timeZone = summaries[provider]?.page.timeZone
+            var calendar = Calendar(identifier: .gregorian)
+            if let tz = timeZone, let zone = TimeZone(identifier: tz) {
+                calendar.timeZone = zone
+            }
+
+            var lookup: [String: [Date: [DayIncidentDetail]]] = [:]
+            let allComponentIDs = Set(
+                (summaries[provider]?.components ?? [])
+                    .filter { $0.group != true }
+                    .map(\.id)
+            )
+
+            // From incidents API (Atlassian Statuspage — has affected_components)
+            var processedIncidentIDs = Set<String>()
+            if provider.platform == .atlassianStatuspage {
+                let combined = (incidents[provider] ?? []) + (maintenances[provider] ?? [])
+                for incident in combined {
+                    guard let startedAtStr = incident.startedAt,
+                          let startedAt = ComponentTimeline.parseISODate(startedAtStr) else { continue }
+                    let resolvedAt = incident.resolvedAt.flatMap { ComponentTimeline.parseISODate($0) } ?? Date()
+
+                    processedIncidentIDs.insert(incident.id)
+
+                    let fromUpdates = (incident.incidentUpdates ?? [])
+                        .flatMap { $0.affectedComponents ?? [] }
+                        .map(\.code)
+                    let fromComponents = (incident.components ?? []).map(\.id)
+                    let explicitIDs = Set(fromUpdates + fromComponents)
+                    // If no component association, associate to all (bar color filtering prevents false triggers)
+                    let componentIDs = explicitIDs.isEmpty ? allComponentIDs : explicitIDs
+
+                    let impactLevel: TimelineDayLevel = switch incident.impact {
+                    case .minor: .degraded
+                    case .major: .partialOutage
+                    case .critical: .majorOutage
+                    case .maintenance: .maintenance
+                    default: .degraded
+                    }
+
+                    appendDayDetails(
+                        &lookup, componentIDs: componentIDs,
+                        startedAt: startedAt, resolvedAt: resolvedAt,
+                        level: impactLevel, incidentName: incident.name,
+                        calendar: calendar
+                    )
+                }
+
+                // Supplement with /history page incidents (no component info — associate to all)
+                if let historyIncidents = historyPageIncidents[provider] {
+                    for incident in historyIncidents {
+                        guard !processedIncidentIDs.contains(incident.code) else { continue }
+
+                        let impactLevel: TimelineDayLevel = switch incident.impact {
+                        case .minor: .degraded
+                        case .major: .partialOutage
+                        case .critical: .majorOutage
+                        case .maintenance: .maintenance
+                        default: .degraded
+                        }
+
+                        appendDayDetails(
+                            &lookup, componentIDs: allComponentIDs,
+                            startedAt: incident.startedAt, resolvedAt: incident.resolvedAt,
+                            level: impactLevel, incidentName: incident.name,
+                            calendar: calendar
+                        )
+                    }
+                }
+            }
+
+            // From official history impacts (incident.io — has component-level impacts + incident names)
+            if provider.platform == .incidentIO, let history = officialHistories[provider] {
+                for (componentId, component) in history.componentsByID {
+                    for impact in component.impacts {
+                        guard let startAt = ComponentTimeline.parseISODate(impact.startAt) else { continue }
+                        let endAt = impact.endAt.flatMap { ComponentTimeline.parseISODate($0) } ?? Date()
+                        let incidentName = impact.statusPageIncidentId.flatMap { history.incidentNames[$0] }
+
+                        appendDayDetails(
+                            &lookup, componentIDs: [componentId],
+                            startedAt: startAt, resolvedAt: endAt,
+                            level: impact.timelineLevel, incidentName: incidentName,
+                            calendar: calendar
+                        )
+                    }
+                }
+            }
+
+            if !lookup.isEmpty {
+                result[provider] = lookup
+            }
+        }
+
+        return result
+    }
+
+    private static func appendDayDetails(
+        _ lookup: inout [String: [Date: [DayIncidentDetail]]],
+        componentIDs: Set<String>,
+        startedAt: Date, resolvedAt: Date,
+        level: TimelineDayLevel, incidentName: String?,
+        calendar: Calendar
+    ) {
+        let startDay = calendar.startOfDay(for: startedAt)
+        let endDay = calendar.startOfDay(for: resolvedAt)
+        var day = startDay
+
+        while day <= endDay {
+            let dayEnd = calendar.date(byAdding: .day, value: 1, to: day)!
+            let effectiveStart = max(startedAt, day)
+            let effectiveEnd = min(resolvedAt, dayEnd)
+            let duration = effectiveEnd.timeIntervalSince(effectiveStart)
+
+            for componentId in componentIDs {
+                let detail = DayIncidentDetail(
+                    level: level,
+                    durationSeconds: max(0, duration),
+                    incidentName: incidentName
+                )
+                lookup[componentId, default: [:]][day, default: []].append(detail)
+            }
+
+            guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+            day = next
+        }
     }
 }
 

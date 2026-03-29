@@ -1,10 +1,12 @@
 import AppKit
+import MenuBarExtraAccess
 import SwiftUI
 
 @main
 struct MenuStatusApp: App {
     @State private var settings: SettingsStore
     @State private var store: StatusStore
+    @State private var isMenuPresented: Bool = false
     @StateObject private var updaterService = UpdaterService()
 
     init() {
@@ -19,9 +21,13 @@ struct MenuStatusApp: App {
     var body: some Scene {
         MenuBarExtra {
             StatusMenuContentView(store: store)
+                .introspectMenuBarExtraWindow { window in
+                    window.animationBehavior = .utilityWindow
+                }
         } label: {
-            Image(nsImage: menuBarIcon)
+            MenuBarIcon(indicator: store.overallIndicator, style: settings.iconStyle)
         }
+        .menuBarExtraAccess(isPresented: $isMenuPresented)
         .menuBarExtraStyle(.window)
 
         Window("Settings", id: "settings") {
@@ -30,21 +36,75 @@ struct MenuStatusApp: App {
         .windowResizability(.contentSize)
         .defaultPosition(.center)
     }
+}
 
-    private var menuBarIcon: NSImage {
-        let indicator = store.overallIndicator
+private struct MenuBarIcon: View {
+    let indicator: StatusIndicator
+    let style: MenuBarIconStyle
+
+    var body: some View {
+        Image(nsImage: buildImage())
+    }
+
+    private func buildImage() -> NSImage {
         let sizeConfig = NSImage.SymbolConfiguration(pointSize: 16, weight: .regular)
-        let symbol = indicator.menuBarSymbol
 
+        switch style {
+        case .outline:
+            return buildOutline(sizeConfig: sizeConfig)
+        case .filled:
+            return buildFilledCutout(sizeConfig: sizeConfig)
+        case .tinted:
+            return buildTinted(sizeConfig: sizeConfig)
+        }
+    }
+
+    // Outline: template when operational, colored outline otherwise
+    private func buildOutline(sizeConfig: NSImage.SymbolConfiguration) -> NSImage {
+        let symbol = indicator.menuBarSymbol
         if indicator == .none {
             let image = NSImage(systemSymbolName: symbol, accessibilityDescription: indicator.displayName)?
                 .withSymbolConfiguration(sizeConfig) ?? NSImage()
             image.isTemplate = true
             return image
         }
+        let config = NSImage.SymbolConfiguration(paletteColors: [NSColor(indicator.color)]).applying(sizeConfig)
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: indicator.displayName)?
+            .withSymbolConfiguration(config) ?? NSImage()
+        image.isTemplate = false
+        return image
+    }
 
-        let colorConfig = NSImage.SymbolConfiguration(paletteColors: [NSColor(indicator.color)])
-        let config = colorConfig.applying(sizeConfig)
+    // Filled cutout: solid background shape with transparent foreground symbol
+    private func buildFilledCutout(sizeConfig: NSImage.SymbolConfiguration) -> NSImage {
+        let symbol = indicator.sfSymbol
+        let baseColor = NSColor(indicator.color)
+
+        // Solid colored symbol (both layers same color)
+        let solidConfig = NSImage.SymbolConfiguration(paletteColors: [baseColor, baseColor]).applying(sizeConfig)
+        let solidImage = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(solidConfig) ?? NSImage()
+
+        // Foreground-only mask
+        let maskConfig = NSImage.SymbolConfiguration(paletteColors: [.white, .clear]).applying(sizeConfig)
+        let maskImage = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
+            .withSymbolConfiguration(maskConfig) ?? NSImage()
+
+        // Punch out the foreground shape
+        let result = NSImage(size: solidImage.size, flipped: false) { rect in
+            solidImage.draw(in: rect, from: .zero, operation: .copy, fraction: 1.0)
+            maskImage.draw(in: rect, from: .zero, operation: .destinationOut, fraction: 1.0)
+            return true
+        }
+        result.isTemplate = false
+        return result
+    }
+
+    // Tinted: colored foreground symbol on dim colored background
+    private func buildTinted(sizeConfig: NSImage.SymbolConfiguration) -> NSImage {
+        let symbol = indicator.sfSymbol
+        let baseColor = NSColor(indicator.color)
+        let config = NSImage.SymbolConfiguration(hierarchicalColor: baseColor).applying(sizeConfig)
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: indicator.displayName)?
             .withSymbolConfiguration(config) ?? NSImage()
         image.isTemplate = false

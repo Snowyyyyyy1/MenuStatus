@@ -2,6 +2,12 @@ import Foundation
 import Observation
 import ServiceManagement
 
+enum MenuBarIconStyle: Int, CaseIterable {
+    case outline = 0
+    case filled = 1
+    case tinted = 2
+}
+
 @Observable
 final class SettingsStore {
     var refreshInterval: TimeInterval {
@@ -19,6 +25,10 @@ final class SettingsStore {
         didSet {
             UserDefaults.standard.set(Array(disabledProviderIDs), forKey: Keys.disabledProviderIDs)
         }
+    }
+
+    var iconStyle: MenuBarIconStyle {
+        didSet { UserDefaults.standard.set(iconStyle.rawValue, forKey: Keys.iconStyle) }
     }
 
     let providerConfigs: ProviderConfigStore
@@ -40,6 +50,7 @@ final class SettingsStore {
             self.disabledProviderIDs = []
         }
 
+        self.iconStyle = MenuBarIconStyle(rawValue: defaults.integer(forKey: Keys.iconStyle)) ?? .outline
         self.providerConfigs = providerConfigs
     }
 
@@ -68,6 +79,7 @@ final class SettingsStore {
         static let refreshInterval = "refreshInterval"
         static let launchAtLogin = "launchAtLogin"
         static let disabledProviderIDs = "disabledProviderIDs"
+        static let iconStyle = "iconStyle"
     }
 }
 

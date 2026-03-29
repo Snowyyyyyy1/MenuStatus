@@ -24,6 +24,15 @@ struct SettingsView: View {
                 }
 
                 Toggle("Launch at login", isOn: $settings.launchAtLogin)
+
+                Picker("Menu bar icon", selection: $settings.iconStyle) {
+                    Label("Outline", systemImage: "checkmark.circle")
+                        .tag(MenuBarIconStyle.outline)
+                    Label("Filled", systemImage: "checkmark.circle.fill")
+                        .tag(MenuBarIconStyle.filled)
+                    Label("Tinted", systemImage: "checkmark.circle.fill")
+                        .tag(MenuBarIconStyle.tinted)
+                }
             }
 
             Section("Providers") {

@@ -10,10 +10,12 @@ echo "==> Generating Xcode project..."
 TUIST_SKIP_UPDATE_CHECK=1 tuist generate --no-open
 
 echo "==> Building..."
-TUIST_SKIP_UPDATE_CHECK=1 tuist xcodebuild build \
+xcodebuild build \
+    -workspace MenuStatus.xcworkspace \
     -scheme MenuStatus \
     -configuration Debug \
-    -derivedDataPath .build
+    -derivedDataPath .build \
+    -quiet
 
 echo "==> Launching..."
 APP_PATH=$(find .build -name "MenuStatus.app" -type d | head -1)

@@ -2,6 +2,7 @@ import SwiftUI
 
 private enum UptimeBarStyle {
     static let height: CGFloat = 22
+    static let tooltipWidth: CGFloat = 220
 }
 
 // MARK: - Provider Section
@@ -24,7 +25,7 @@ struct ProviderSectionView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        LazyVStack(alignment: .leading, spacing: 0) {
             // Overall status header
             HStack {
                 Label(summary.status.indicator.displayName, systemImage: summary.status.indicator.sfSymbol)
@@ -47,31 +48,33 @@ struct ProviderSectionView: View {
                 .padding(.horizontal, 16)
 
             if groupedSections.isEmpty {
-                ForEach(Array(visibleComponents.enumerated()), id: \.element.id) { index, component in
+                ForEach(visibleComponents) { component in
                     ComponentUptimeRow(
                         component: component,
                         timeline: store.timeline(for: provider, componentId: component.id),
+                        dayDetails: store.dayDetails(for: provider, componentId: component.id),
                         statusPageURL: provider.statusPageURL
                     )
-
-                    if index < visibleComponents.count - 1 {
-                        Divider()
-                            .padding(.horizontal, 16)
-                    }
                 }
             } else {
-                ForEach(Array(groupedSections.enumerated()), id: \.element.id) { index, section in
-                    GroupedComponentSectionView(
+                ForEach(groupedSections) { section in
+                    GroupHeaderView(
                         section: section,
                         isExpanded: store.isExpanded(section),
-                        provider: provider,
                         store: store,
-                        statusPageURL: provider.statusPageURL
+                        dayDetails: store.dayDetails(for: provider, section: section)
                     )
 
-                    if index < groupedSections.count - 1 {
-                        Divider()
-                            .padding(.horizontal, 16)
+                    if store.isExpanded(section) {
+                        ForEach(section.components) { component in
+                            ComponentUptimeRow(
+                                component: component,
+                                timeline: store.timeline(for: provider, componentId: component.id),
+                                dayDetails: store.dayDetails(for: provider, componentId: component.id),
+                                statusPageURL: provider.statusPageURL,
+                                contentPaddingLeading: 30
+                            )
+                        }
                     }
                 }
             }
@@ -80,71 +83,48 @@ struct ProviderSectionView: View {
     }
 }
 
-// MARK: - Grouped Component Section
+// MARK: - Group Header
 
-struct GroupedComponentSectionView: View {
+struct GroupHeaderView: View {
     let section: GroupedComponentSection
     let isExpanded: Bool
-    let provider: ProviderConfig
     let store: StatusStore
-    let statusPageURL: URL
+    let dayDetails: [Date: [DayIncidentDetail]]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                store.toggleExpansion(for: section)
-            } label: {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .center, spacing: 8) {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(.secondary)
+        Button {
+            store.toggleExpansion(for: section)
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .center, spacing: 8) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
 
-                        Text(section.title)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.primary)
+                    Text(section.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.primary)
 
-                        Text("\(section.componentCount) component\(section.componentCount == 1 ? "" : "s")")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+                    Text("\(section.componentCount) component\(section.componentCount == 1 ? "" : "s")")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
 
-                        Spacer()
+                    Spacer()
 
-                        Text(section.status.displayName)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(section.status.color)
-                    }
-
-                    if let timeline = section.timeline {
-                        UptimeBarWithLabels(timeline: timeline)
-                    }
+                    Text(section.status.displayName)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(section.status.color)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
 
-            if isExpanded {
-                VStack(spacing: 0) {
-                    ForEach(Array(section.components.enumerated()), id: \.element.id) { index, component in
-                        ComponentUptimeRow(
-                            component: component,
-                            timeline: store.timeline(for: provider, componentId: component.id),
-                            statusPageURL: statusPageURL,
-                            contentPaddingLeading: 30
-                        )
-
-                        if index < section.components.count - 1 {
-                            Divider()
-                                .padding(.leading, 30)
-                                .padding(.trailing, 16)
-                        }
-                    }
+                if let timeline = section.timeline {
+                    UptimeBarWithLabels(timeline: timeline, dayDetails: dayDetails)
                 }
-                .padding(.bottom, 6)
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 }
 
@@ -153,12 +133,12 @@ struct GroupedComponentSectionView: View {
 struct ComponentUptimeRow: View {
     let component: Component
     let timeline: ComponentTimeline?
+    let dayDetails: [Date: [DayIncidentDetail]]
     let statusPageURL: URL
     var contentPaddingLeading: CGFloat = 16
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            // Component name + status
             HStack {
                 Text(component.name)
                     .font(.system(size: 12, weight: .semibold))
@@ -169,7 +149,7 @@ struct ComponentUptimeRow: View {
             }
 
             if let timeline {
-                UptimeBarWithLabels(timeline: timeline)
+                UptimeBarWithLabels(timeline: timeline, dayDetails: dayDetails)
             }
         }
         .padding(.leading, contentPaddingLeading)
@@ -186,10 +166,11 @@ struct ComponentUptimeRow: View {
 
 struct UptimeBarWithLabels: View {
     let timeline: ComponentTimeline
+    let dayDetails: [Date: [DayIncidentDetail]]
 
     var body: some View {
         VStack(spacing: 0) {
-            UptimeBarView(timeline: timeline, height: UptimeBarStyle.height)
+            UptimeBarView(timeline: timeline, height: UptimeBarStyle.height, dayDetails: dayDetails)
 
             HStack {
                 Text("90 days ago")
@@ -211,17 +192,139 @@ struct UptimeBarWithLabels: View {
 struct UptimeBarView: View {
     let timeline: ComponentTimeline
     let height: CGFloat
+    let dayDetails: [Date: [DayIncidentDetail]]
+
+    @Environment(TooltipState.self) private var tooltipState
+    @State private var hoveredDayIndex: Int?
 
     var body: some View {
-        HStack(spacing: 1) {
-            ForEach(timeline.days) { day in
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(day.color)
-                    .frame(height: height)
-                    .help(day.tooltip)
+        Canvas { context, size in
+            let count = timeline.days.count
+            guard count > 0 else { return }
+            let spacing: CGFloat = 1
+            let totalSpacing = spacing * CGFloat(count - 1)
+            let barWidth = (size.width - totalSpacing) / CGFloat(count)
+
+            for (index, day) in timeline.days.enumerated() {
+                let x = CGFloat(index) * (barWidth + spacing)
+                let rect = CGRect(x: x, y: 0, width: barWidth, height: size.height)
+                context.fill(Path(roundedRect: rect, cornerRadius: 1), with: .color(day.color))
+
+                if index == hoveredDayIndex {
+                    context.stroke(Path(roundedRect: rect.insetBy(dx: -0.5, dy: -0.5), cornerRadius: 1),
+                                   with: .color(.white), lineWidth: 1.5)
+                }
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 3))
+        .frame(height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+        .overlay {
+            GeometryReader { proxy in
+                let menuFrame = proxy.frame(in: .named("menu"))
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onContinuousHover { phase in
+                        switch phase {
+                        case .active(let point):
+                            let count = timeline.days.count
+                            guard count > 0 else { return }
+                            let index = min(max(0, Int(point.x / proxy.size.width * CGFloat(count))), count - 1)
+                            let day = timeline.days[index]
+                            let details = dayDetails[day.date] ?? []
+                            hoveredDayIndex = index
+
+                            if !details.isEmpty && day.level != .operational && day.level != .noData {
+                                let dayX = menuFrame.minX + (CGFloat(index) + 0.5) / CGFloat(count) * proxy.size.width
+                                tooltipState.info = TooltipState.TooltipInfo(
+                                    day: day,
+                                    details: details,
+                                    dayX: dayX,
+                                    barMinY: menuFrame.minY,
+                                    barMaxY: menuFrame.maxY
+                                )
+                            } else {
+                                tooltipState.info = nil
+                            }
+                        case .ended:
+                            hoveredDayIndex = nil
+                            tooltipState.info = nil
+                        }
+                    }
+            }
+        }
+    }
+}
+
+// MARK: - Day Detail Tooltip
+
+struct DayDetailTooltip: View {
+    let day: DayStatus
+    let details: [DayIncidentDetail]
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "d MMM yyyy"
+        return f
+    }()
+
+    private var groupedDetails: [(level: TimelineDayLevel, totalSeconds: TimeInterval)] {
+        var byLevel: [TimelineDayLevel: TimeInterval] = [:]
+        for detail in details {
+            byLevel[detail.level, default: 0] += detail.durationSeconds
+        }
+        return byLevel.sorted { $0.key > $1.key }.map { (level: $0.key, totalSeconds: $0.value) }
+    }
+
+    private var incidentNames: [String] {
+        Array(Set(details.compactMap(\.incidentName)))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(Self.dateFormatter.string(from: day.date))
+                .font(.system(size: 11, weight: .semibold))
+
+            if !groupedDetails.isEmpty {
+                ForEach(groupedDetails, id: \.level) { entry in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(entry.level.color)
+                            .frame(width: 6, height: 6)
+                        Text(entry.level.displayName.capitalized)
+                            .font(.system(size: 10, weight: .medium))
+                        Spacer()
+                        Text(formatDuration(entry.totalSeconds))
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if !incidentNames.isEmpty {
+                    Divider()
+                    Text("RELATED")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                    ForEach(incidentNames, id: \.self) { name in
+                        Text(name)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .padding(10)
+        .frame(width: UptimeBarStyle.tooltipWidth)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let hours = Int(seconds) / 3600
+        let mins = (Int(seconds) % 3600) / 60
+        if hours > 0 {
+            return "\(hours) hrs \(mins) mins"
+        }
+        return "\(max(1, mins)) mins"
     }
 }
 
@@ -250,7 +353,7 @@ struct IncidentRow: View {
                         .padding(.vertical, 2)
                         .background(impact.impactColor.opacity(0.15))
                         .foregroundStyle(impact.impactColor)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                        .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
                 }
             }
 

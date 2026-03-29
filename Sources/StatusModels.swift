@@ -261,6 +261,47 @@ struct AffectedComponent: Codable {
     let newStatus: String
 }
 
+// MARK: - Incident History Response
+
+struct IncidentHistoryResponse: Codable {
+    let incidents: [Incident]
+}
+
+struct ScheduledMaintenancesResponse: Codable {
+    let scheduledMaintenances: [Incident]
+}
+
+struct HistoryPageIncident {
+    let code: String
+    let name: String
+    let impact: StatusIndicator?
+    let startedAt: Date
+    let resolvedAt: Date
+}
+
+// MARK: - Day Incident Detail
+
+struct DayIncidentDetail {
+    let level: TimelineDayLevel
+    let durationSeconds: TimeInterval
+    let incidentName: String?
+}
+
+// MARK: - Tooltip State
+
+@Observable
+final class TooltipState {
+    var info: TooltipInfo?
+
+    struct TooltipInfo {
+        let day: DayStatus
+        let details: [DayIncidentDetail]
+        let dayX: CGFloat
+        let barMinY: CGFloat
+        let barMaxY: CGFloat
+    }
+}
+
 // MARK: - Daily Uptime
 
 struct DayStatus: Identifiable {
@@ -581,6 +622,7 @@ struct OfficialHistorySnapshot {
     let generatedAt: Date?
     let groups: [OfficialHistoryGroup]
     let componentsByID: [String: OfficialHistoryComponent]
+    let incidentNames: [String: String]  // incidentId → name
 }
 
 struct OfficialHistoryGroup {
@@ -692,6 +734,7 @@ struct OfficialComponentImpact: Decodable {
     let endAt: String?
     let startAt: String
     let status: OfficialImpactStatus
+    let statusPageIncidentId: String?
 
     var timelineLevel: TimelineDayLevel {
         status.timelineLevel

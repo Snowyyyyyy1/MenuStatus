@@ -10,7 +10,9 @@ struct StatusMenuContentView: View {
     let store: StatusStore
     @Environment(\.openWindow) private var openWindow
     @State private var selectedProvider: ProviderConfig?
-    @State private var contentHeight: CGFloat = 0
+    @State private var contentHeights: [ProviderConfig: CGFloat] = [:]
+    @State private var tooltipState = TooltipState()
+    @State private var tooltipHeight: CGFloat = 0
 
     private var enabledProviders: [ProviderConfig] {
         store.settings.providerConfigs.enabledProviders(settings: store.settings)
@@ -28,27 +30,30 @@ struct StatusMenuContentView: View {
         return max(200, screenHeight - MenuContentSizing.minScreenMargin)
     }
 
+    private var activeContentHeight: CGFloat {
+        guard let provider = activeProvider else { return .infinity }
+        return contentHeights[provider] ?? .infinity
+    }
+
     private var needsScroll: Bool {
-        contentHeight > maxVisibleContentHeight
+        activeContentHeight > maxVisibleContentHeight
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Tab bar
-            HStack(spacing: 0) {
+            HStack(spacing: 8) {
                 ForEach(enabledProviders) { provider in
                     ProviderTab(
                         provider: provider,
                         isSelected: activeProvider == provider,
                         indicator: store.summaries[provider]?.status.indicator
                     ) {
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            selectedProvider = provider
-                        }
+                        selectedProvider = provider
                     }
                 }
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 10)
             .padding(.top, 10)
             .padding(.bottom, 6)
 
@@ -78,9 +83,12 @@ struct StatusMenuContentView: View {
             // Footer
             HStack {
                 if let date = store.lastRefreshed {
-                    Text("Updated \(date, style: .relative) ago")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        let seconds = Int(context.date.timeIntervalSince(date))
+                        Text("Updated \(seconds < 60 ? "\(seconds) sec" : "\(seconds / 60) min") ago")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
                 Spacer()
 
@@ -116,10 +124,39 @@ struct StatusMenuContentView: View {
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .padding(10)
         }
         .frame(width: MenuContentSizing.width)
+        .coordinateSpace(name: "menu")
+        .environment(tooltipState)
+        .overlay(alignment: .topLeading) {
+            if let info = tooltipState.info, info.details.contains(where: { $0.level != .operational && $0.level != .noData }) {
+                let pad: CGFloat = 8
+                let showBelow = info.barMinY < (tooltipHeight + pad * 2)
+                let y = showBelow ? info.barMaxY + pad : info.barMinY - tooltipHeight - pad
+
+                DayDetailTooltip(day: info.day, details: info.details)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear
+                                .onAppear { tooltipHeight = proxy.size.height }
+                                .onChange(of: proxy.size.height) { _, h in tooltipHeight = h }
+                        }
+                    }
+                    .offset(
+                        x: tooltipOffsetX(dayX: info.dayX),
+                        y: max(0, y)
+                    )
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+
+    private func tooltipOffsetX(dayX: CGFloat) -> CGFloat {
+        let half: CGFloat = 110
+        let pad: CGFloat = 8
+        return min(max(pad, dayX - half), MenuContentSizing.width - half * 2 - pad)
     }
 
     private var measuredContent: some View {
@@ -128,10 +165,14 @@ struct StatusMenuContentView: View {
             .background {
                 GeometryReader { proxy in
                     Color.clear.onAppear {
-                        contentHeight = proxy.size.height
+                        if let provider = activeProvider {
+                            contentHeights[provider] = proxy.size.height
+                        }
                     }
                     .onChange(of: proxy.size.height) { _, newHeight in
-                        contentHeight = newHeight
+                        if let provider = activeProvider {
+                            contentHeights[provider] = newHeight
+                        }
                     }
                 }
             }
@@ -169,24 +210,24 @@ struct ProviderTab: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 4) {
-                HStack(spacing: 5) {
-                    if let indicator {
-                        Circle()
-                            .fill(indicator.color)
-                            .frame(width: 6, height: 6)
-                    }
-                    Text(provider.displayName)
-                        .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+            HStack(spacing: 5) {
+                if let indicator {
+                    Circle()
+                        .fill(indicator.color)
+                        .frame(width: 6, height: 6)
                 }
-                .foregroundStyle(isSelected ? .primary : .secondary)
-
-                RoundedRectangle(cornerRadius: 1)
-                    .fill(isSelected ? Color.accentColor : .clear)
-                    .frame(height: 2)
+                Text(provider.displayName)
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
             }
+            .foregroundStyle(isSelected ? .primary : .secondary)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isSelected ? Color.primary.opacity(0.1) : .clear)
+            )
+            .animation(.easeInOut(duration: 0.15), value: isSelected)
         }
         .buttonStyle(.plain)
-        .frame(maxWidth: .infinity)
     }
 }
