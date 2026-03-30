@@ -60,12 +60,13 @@ struct ProviderSectionView: View {
                 ForEach(groupedSections) { section in
                     GroupHeaderView(
                         section: section,
-                        isExpanded: store.isExpanded(section),
+                        isExpanded: store.isExpanded(section, provider: provider),
+                        provider: provider,
                         store: store,
                         dayDetails: store.dayDetails(for: provider, section: section)
                     )
 
-                    if store.isExpanded(section) {
+                    if store.isExpanded(section, provider: provider) {
                         ForEach(section.components) { component in
                             ComponentUptimeRow(
                                 component: component,
@@ -88,6 +89,7 @@ struct ProviderSectionView: View {
 struct GroupHeaderView: View {
     let section: GroupedComponentSection
     let isExpanded: Bool
+    let provider: ProviderConfig
     let store: StatusStore
     let dayDetails: [Date: [DayIncidentDetail]]
 
@@ -95,16 +97,15 @@ struct GroupHeaderView: View {
 
     var body: some View {
         Button {
-            store.toggleExpansion(for: section)
+            store.toggleExpansion(for: section, provider: provider)
         } label: {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .center, spacing: 8) {
-                    Image(systemName: "chevron.right")
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(isHovered ? .primary : .tertiary)
                         .scaleEffect(isHovered ? 1.2 : 1.0)
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        .animation(.easeInOut(duration: 0.2), value: isExpanded)
+                        .animation(.easeInOut(duration: 0.15), value: isHovered)
 
                     Text(section.title)
                         .font(.system(size: 13, weight: .semibold))
@@ -133,7 +134,6 @@ struct GroupHeaderView: View {
         .onHover { hovering in
             isHovered = hovering
         }
-        .animation(.easeInOut(duration: 0.15), value: isHovered)
     }
 }
 
@@ -287,7 +287,8 @@ struct DayDetailTooltip: View {
     }
 
     private var incidentNames: [String] {
-        Array(Set(details.compactMap(\.incidentName)))
+        var seen = Set<String>()
+        return details.compactMap(\.incidentName).filter { seen.insert($0).inserted }
     }
 
     var body: some View {

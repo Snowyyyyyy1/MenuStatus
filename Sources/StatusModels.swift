@@ -1,6 +1,27 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Date Parsing
+
+enum DateParsing {
+    private static let iso: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let isoFallback: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    static func parseISODate(_ s: String?) -> Date? {
+        guard let s else { return nil }
+        return iso.date(from: s) ?? isoFallback.date(from: s)
+    }
+}
+
 // MARK: - Platform & Provider
 
 enum StatusPlatform: String, Codable {
@@ -305,14 +326,13 @@ final class TooltipState {
 // MARK: - Daily Uptime
 
 struct DayStatus: Identifiable {
-    let id: Date
+    var id: Date { date }
     let date: Date
     let level: TimelineDayLevel
     let color: Color
     let tooltip: String
 
     init(date: Date, level: TimelineDayLevel, tooltip: String) {
-        self.id = date
         self.date = date
         self.level = level
         self.color = level.color
@@ -461,8 +481,8 @@ struct ComponentTimeline {
 
         var dayImpacts: [Date: TimelineDayLevel] = [:]
         for impact in impacts {
-            guard let startAt = parseISODate(impact.startAt) else { continue }
-            let impactEnd = parseISODate(impact.endAt) ?? now
+            guard let startAt = DateParsing.parseISODate(impact.startAt) else { continue }
+            let impactEnd = DateParsing.parseISODate(impact.endAt) ?? now
             let start = calendar.startOfDay(for: startAt)
             let end = calendar.startOfDay(for: impactEnd)
 
@@ -557,23 +577,6 @@ struct ComponentTimeline {
         let healthyDays = aggregatedDays.filter { $0.level == TimelineDayLevel.operational }.count
         let uptime = uptimePercentOverride ?? (Double(healthyDays) / Double(aggregatedDays.count) * 100.0)
         return ComponentTimeline(days: aggregatedDays, uptimePercent: uptime)
-    }
-
-    private static let iso: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
-    private static let isoFallback: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f
-    }()
-
-    static func parseISODate(_ s: String?) -> Date? {
-        guard let s else { return nil }
-        return iso.date(from: s) ?? isoFallback.date(from: s)
     }
 
     private static func configuredCalendar(timeZoneIdentifier: String?) -> Calendar {
@@ -776,10 +779,10 @@ struct OfficialComponentImpact: Decodable {
     }
 
     func isActive(at now: Date) -> Bool {
-        guard let startAt = ComponentTimeline.parseISODate(startAt), startAt <= now else {
+        guard let startAt = DateParsing.parseISODate(startAt), startAt <= now else {
             return false
         }
-        if let endAt, let resolvedAt = ComponentTimeline.parseISODate(endAt), resolvedAt < now {
+        if let endAt, let resolvedAt = DateParsing.parseISODate(endAt), resolvedAt < now {
             return false
         }
         return true

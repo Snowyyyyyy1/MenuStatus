@@ -1,7 +1,7 @@
 import Foundation
 import Sparkle
 
-final class UpdaterService: ObservableObject {
+@Observable final class UpdaterService {
     let updater: SPUUpdater
 
     init() {

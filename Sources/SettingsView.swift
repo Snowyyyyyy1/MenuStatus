@@ -1,10 +1,51 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+private struct LeadingTextField: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+
+    func makeNSView(context: Context) -> NSTextField {
+        let field = NSTextField()
+        field.alignment = .left
+        field.isBordered = true
+        field.isBezeled = true
+        field.bezelStyle = .roundedBezel
+        field.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        field.placeholderString = placeholder
+        field.delegate = context.coordinator
+        field.lineBreakMode = .byTruncatingTail
+        field.cell?.truncatesLastVisibleLine = true
+        return field
+    }
+
+    func updateNSView(_ nsView: NSTextField, context: Context) {
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
+        nsView.placeholderString = placeholder
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        let parent: LeadingTextField
+        init(_ parent: LeadingTextField) { self.parent = parent }
+        func controlTextDidChange(_ obj: Notification) {
+            guard let field = obj.object as? NSTextField else { return }
+            parent.text = field.stringValue
+        }
+    }
+}
+
 struct SettingsView: View {
     @Bindable var settings: SettingsStore
     var store: StatusStore?
-    @ObservedObject var updaterService: UpdaterService
+    var updaterService: UpdaterService
+
+    private var orderedProviders: [ProviderConfig] {
+        settings.providerConfigs.orderedProviders(settings: settings)
+    }
 
     private let intervalOptions: [(String, TimeInterval)] = [
         ("30 seconds", 30),
@@ -36,25 +77,19 @@ struct SettingsView: View {
             }
 
             Section("Providers") {
-                ForEach(settings.providerConfigs.allProviders) { provider in
-                    HStack {
-                        Toggle(provider.displayName, isOn: Binding(
-                            get: { settings.isEnabled(provider) },
-                            set: { _ in settings.toggleProvider(provider) }
-                        ))
-
-                        if !provider.isBuiltIn {
-                            Spacer()
-                            Button {
-                                settings.providerConfigs.removeProvider(id: provider.id, settings: settings)
-                            } label: {
-                                Image(systemName: "trash")
-                                    .foregroundStyle(.red)
-                            }
-                            .buttonStyle(.borderless)
-                        }
+                List {
+                    ForEach(orderedProviders) { (provider: ProviderConfig) in
+                        ProviderRow(provider: provider, settings: settings)
+                    }
+                    .onMove { source, destination in
+                        var ids = orderedProviders.map(\.id)
+                        ids.move(fromOffsets: source, toOffset: destination)
+                        settings.providerOrder = ids
                     }
                 }
+                .listStyle(.plain)
+                .scrollDisabled(true)
+                .fixedSize(horizontal: false, vertical: true)
 
                 AddProviderRow(providerConfigs: settings.providerConfigs, store: store)
             }
@@ -62,7 +97,7 @@ struct SettingsView: View {
             Section("Data") {
                 HStack {
                     ExportButton(providerConfigs: settings.providerConfigs)
-                    ImportButton(providerConfigs: settings.providerConfigs)
+                    ImportButton(providerConfigs: settings.providerConfigs, store: store)
                 }
             }
 
@@ -88,6 +123,58 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 360)
         .fixedSize()
+    }
+}
+
+// MARK: - Provider Row
+
+private struct ProviderRow: View {
+    let provider: ProviderConfig
+    @Bindable var settings: SettingsStore
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "line.3.horizontal")
+                .foregroundStyle(.tertiary)
+                .font(.caption)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(provider.displayName)
+                    Spacer()
+                    Toggle("", isOn: Binding(
+                        get: { settings.isEnabled(provider) },
+                        set: { _ in settings.toggleProvider(provider) }
+                    ))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                }
+                HStack {
+                    LeadingTextField(
+                        text: Binding(
+                            get: { settings.customProviderNames[provider.id] ?? "" },
+                            set: { settings.customProviderNames[provider.id] = $0 }
+                        ),
+                        placeholder: "Alias"
+                    )
+                    .frame(maxWidth: 140)
+                    .frame(height: 22)
+
+                    Spacer()
+
+                    if !provider.isBuiltIn {
+                        Button {
+                            settings.providerConfigs.removeProvider(id: provider.id, settings: settings)
+                        } label: {
+                            Image(systemName: "trash")
+                                .foregroundStyle(.red)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -171,6 +258,7 @@ private struct ExportButton: View {
 
 private struct ImportButton: View {
     let providerConfigs: ProviderConfigStore
+    var store: StatusStore?
     @State private var showImport = false
     @State private var importResult: String?
 
@@ -182,6 +270,9 @@ private struct ImportButton: View {
                 Task {
                     let added = try await providerConfigs.importJSON(data)
                     importResult = "Added \(added.count) provider(s)"
+                    if !added.isEmpty, let store {
+                        await store.refreshNow()
+                    }
                 }
             }
     }
@@ -191,6 +282,7 @@ struct ProviderExportDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.json] }
     let data: Data
 
+    @MainActor
     init(providerConfigs: ProviderConfigStore) {
         self.data = (try? providerConfigs.exportJSON()) ?? Data()
     }

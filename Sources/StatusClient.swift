@@ -150,7 +150,7 @@ struct StatusClient {
             return nil
         }
 
-        return parseISO(String(text[range]))
+        return DateParsing.parseISODate(String(text[range]))
     }
 
     private static func parseStatuspageGeneratedAt(in html: String) -> Date? {
@@ -503,9 +503,6 @@ struct StatusClient {
         return results
     }
 
-    private static func parseISO(_ value: String) -> Date? {
-        ComponentTimeline.parseISODate(value)
-    }
 }
 
 enum IncidentIOParseError: Error {

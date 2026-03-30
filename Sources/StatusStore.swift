@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 
+@MainActor
 @Observable
 final class StatusStore {
     var summaries: [ProviderConfig: StatuspageSummary] = [:]
@@ -51,24 +52,73 @@ final class StatusStore {
         groupedSections[provider] ?? []
     }
 
-    func isExpanded(_ section: GroupedComponentSection) -> Bool {
-        groupExpansionOverrides[section.id] ?? (section.status != .operational)
+    func isExpanded(_ section: GroupedComponentSection, provider: ProviderConfig) -> Bool {
+        let key = "\(provider.id):\(section.id)"
+        return groupExpansionOverrides[key] ?? (section.status != .operational)
     }
 
-    func toggleExpansion(for section: GroupedComponentSection) {
-        let currentValue = isExpanded(section)
-        groupExpansionOverrides[section.id] = !currentValue
+    func toggleExpansion(for section: GroupedComponentSection, provider: ProviderConfig) {
+        let key = "\(provider.id):\(section.id)"
+        let currentValue = groupExpansionOverrides[key] ?? (section.status != .operational)
+        groupExpansionOverrides[key] = !currentValue
     }
 
-    @MainActor
     func refreshNow() async {
         isLoading = true
         errorMessage = nil
 
         let activeProviders = settings.providerConfigs.enabledProviders(settings: settings)
         let activeSet = Set(activeProviders)
-        var stagedSummaries = summaries.filter { activeSet.contains($0.key) }
+        let existingSummaries = summaries.filter { activeSet.contains($0.key) }
 
+        let fetchResults = await Self.fetchAllProviderData(
+            for: activeProviders,
+            existingSummaries: existingSummaries
+        )
+
+        if !fetchResults.errors.isEmpty {
+            errorMessage = fetchResults.errors.joined(separator: "\n")
+        }
+
+        let builtIncidentLookup = Self.buildIncidentLookup(
+            providers: activeProviders,
+            incidents: fetchResults.incidents,
+            maintenances: fetchResults.maintenances,
+            historyPageIncidents: fetchResults.historyPageIncidents,
+            officialHistories: fetchResults.officialHistories,
+            summaries: fetchResults.summaries
+        )
+
+        let derivedState = Self.derivePresentationState(
+            providers: activeProviders,
+            summaries: fetchResults.summaries,
+            currentTimelines: componentTimelines.filter { activeSet.contains($0.key) },
+            currentSections: groupedSections.filter { activeSet.contains($0.key) },
+            officialHistories: fetchResults.officialHistories,
+            incidentLookup: builtIncidentLookup
+        )
+
+        summaries = fetchResults.summaries
+        componentTimelines = derivedState.timelines
+        groupedSections = derivedState.sections
+        incidentLookup = builtIncidentLookup
+        lastRefreshed = Date()
+        isLoading = false
+    }
+
+    private struct ProviderFetchResults {
+        var summaries: [ProviderConfig: StatuspageSummary]
+        var officialHistories: [ProviderConfig: OfficialHistorySnapshot] = [:]
+        var incidents: [ProviderConfig: [Incident]] = [:]
+        var maintenances: [ProviderConfig: [Incident]] = [:]
+        var historyPageIncidents: [ProviderConfig: [HistoryPageIncident]] = [:]
+        var errors: [String] = []
+    }
+
+    nonisolated private static func fetchAllProviderData(
+        for providers: [ProviderConfig],
+        existingSummaries: [ProviderConfig: StatuspageSummary]
+    ) async -> ProviderFetchResults {
         enum FetchResult {
             case summary(ProviderConfig, Result<StatuspageSummary, Error>)
             case officialHistory(ProviderConfig, Result<OfficialHistorySnapshot, Error>)
@@ -77,8 +127,10 @@ final class StatusStore {
             case historyPage(ProviderConfig, Result<[HistoryPageIncident], Error>)
         }
 
+        var results = ProviderFetchResults(summaries: existingSummaries)
+
         await withTaskGroup(of: FetchResult.self) { group in
-            for provider in activeProviders {
+            for provider in providers {
                 group.addTask {
                     do {
                         let summary = try await StatusClient.fetchSummary(for: provider)
@@ -127,66 +179,33 @@ final class StatusStore {
                 }
             }
 
-            var errors: [String] = []
-            var officialHistories: [ProviderConfig: OfficialHistorySnapshot] = [:]
-            var fetchedIncidents: [ProviderConfig: [Incident]] = [:]
-            var fetchedMaintenances: [ProviderConfig: [Incident]] = [:]
-            var fetchedHistoryPage: [ProviderConfig: [HistoryPageIncident]] = [:]
             for await result in group {
                 switch result {
                 case .summary(let provider, .success(let summary)):
-                    stagedSummaries[provider] = summary
+                    results.summaries[provider] = summary
                 case .summary(let provider, .failure(let error)):
-                    errors.append("\(provider.displayName): \(error.localizedDescription)")
+                    results.errors.append("\(provider.displayName): \(error.localizedDescription)")
                 case .officialHistory(let provider, .success(let history)):
-                    officialHistories[provider] = history
+                    results.officialHistories[provider] = history
                 case .officialHistory(_, .failure):
                     break
                 case .incidents(let provider, .success(let incidents)):
-                    fetchedIncidents[provider] = incidents
+                    results.incidents[provider] = incidents
                 case .incidents(_, .failure):
                     break
                 case .maintenances(let provider, .success(let maintenances)):
-                    fetchedMaintenances[provider] = maintenances
+                    results.maintenances[provider] = maintenances
                 case .maintenances(_, .failure):
                     break
                 case .historyPage(let provider, .success(let historyIncidents)):
-                    fetchedHistoryPage[provider] = historyIncidents
+                    results.historyPageIncidents[provider] = historyIncidents
                 case .historyPage(_, .failure):
                     break
                 }
             }
-
-            if !errors.isEmpty {
-                errorMessage = errors.joined(separator: "\n")
-            }
-
-            let builtIncidentLookup = Self.buildIncidentLookup(
-                providers: activeProviders,
-                incidents: fetchedIncidents,
-                maintenances: fetchedMaintenances,
-                historyPageIncidents: fetchedHistoryPage,
-                officialHistories: officialHistories,
-                summaries: stagedSummaries
-            )
-
-            let derivedState = Self.derivePresentationState(
-                providers: activeProviders,
-                summaries: stagedSummaries,
-                currentTimelines: componentTimelines.filter { activeSet.contains($0.key) },
-                currentSections: groupedSections.filter { activeSet.contains($0.key) },
-                officialHistories: officialHistories,
-                incidentLookup: builtIncidentLookup
-            )
-
-            summaries = stagedSummaries
-            componentTimelines = derivedState.timelines
-            groupedSections = derivedState.sections
-            incidentLookup = builtIncidentLookup
         }
 
-        lastRefreshed = Date()
-        isLoading = false
+        return results
     }
 
     func dayDetails(for provider: ProviderConfig, componentId: String) -> [Date: [DayIncidentDetail]] {
@@ -209,7 +228,7 @@ final class StatusStore {
 // MARK: - Incident Lookup
 
 extension StatusStore {
-    static func buildIncidentLookup(
+    nonisolated static func buildIncidentLookup(
         providers: [ProviderConfig],
         incidents: [ProviderConfig: [Incident]],
         maintenances: [ProviderConfig: [Incident]] = [:],
@@ -239,8 +258,8 @@ extension StatusStore {
                 let combined = (incidents[provider] ?? []) + (maintenances[provider] ?? [])
                 for incident in combined {
                     guard let startedAtStr = incident.startedAt,
-                          let startedAt = ComponentTimeline.parseISODate(startedAtStr) else { continue }
-                    let resolvedAt = incident.resolvedAt.flatMap { ComponentTimeline.parseISODate($0) } ?? Date()
+                          let startedAt = DateParsing.parseISODate(startedAtStr) else { continue }
+                    let resolvedAt = incident.resolvedAt.flatMap { DateParsing.parseISODate($0) } ?? Date()
 
                     processedIncidentIDs.insert(incident.id)
 
@@ -295,8 +314,8 @@ extension StatusStore {
             if provider.platform == .incidentIO, let history = officialHistories[provider] {
                 for (componentId, component) in history.componentsByID {
                     for impact in component.impacts {
-                        guard let startAt = ComponentTimeline.parseISODate(impact.startAt) else { continue }
-                        let endAt = impact.endAt.flatMap { ComponentTimeline.parseISODate($0) } ?? Date()
+                        guard let startAt = DateParsing.parseISODate(impact.startAt) else { continue }
+                        let endAt = impact.endAt.flatMap { DateParsing.parseISODate($0) } ?? Date()
                         let incidentName = impact.statusPageIncidentId.flatMap { history.incidentNames[$0] }
 
                         appendDayDetails(
@@ -317,7 +336,7 @@ extension StatusStore {
         return result
     }
 
-    private static func appendDayDetails(
+    nonisolated private static func appendDayDetails(
         _ lookup: inout [String: [Date: [DayIncidentDetail]]],
         componentIDs: Set<String>,
         startedAt: Date, resolvedAt: Date,
@@ -352,7 +371,7 @@ extension StatusStore {
 // MARK: - Presentation Derivation
 
 extension StatusStore {
-    static func derivePresentationState(
+    nonisolated static func derivePresentationState(
         providers: [ProviderConfig],
         summaries: [ProviderConfig: StatuspageSummary],
         currentTimelines: [ProviderConfig: [String: ComponentTimeline]],
@@ -404,7 +423,7 @@ extension StatusStore {
         return (nextTimelines, nextSections)
     }
 
-    static func buildFlatTimelines(
+    nonisolated static func buildFlatTimelines(
         snapshot: OfficialHistorySnapshot,
         summary: StatuspageSummary,
         incidentLookup: [String: [Date: [DayIncidentDetail]]] = [:]
@@ -426,13 +445,19 @@ extension StatusStore {
                     now: now,
                     timeZoneIdentifier: summary.page.timeZone
                 )
+            } else {
+                timelines[component.id] = ComponentTimeline.buildUnavailable(
+                    title: component.name,
+                    now: now,
+                    timeZoneIdentifier: summary.page.timeZone
+                )
             }
         }
 
         return timelines
     }
 
-    static func buildGroupedSections(
+    nonisolated static func buildGroupedSections(
         snapshot: OfficialHistorySnapshot,
         currentSummary: StatuspageSummary
     ) -> (sections: [GroupedComponentSection], timelines: [String: ComponentTimeline]) {
@@ -499,7 +524,7 @@ extension StatusStore {
         return (sections, timelines)
     }
 
-    static func buildGroupedSectionsFromSummary(
+    nonisolated static func buildGroupedSectionsFromSummary(
         snapshot: OfficialHistorySnapshot,
         summary: StatuspageSummary,
         incidentLookup: [String: [Date: [DayIncidentDetail]]] = [:]
@@ -546,7 +571,7 @@ extension StatusStore {
         return (sections, timelines)
     }
 
-    static func currentOfficialStatus(impacts: [OfficialComponentImpact], now: Date) -> ComponentStatus {
+    nonisolated static func currentOfficialStatus(impacts: [OfficialComponentImpact], now: Date) -> ComponentStatus {
         impacts
             .filter { $0.isActive(at: now) }
             .map(\.componentStatus)

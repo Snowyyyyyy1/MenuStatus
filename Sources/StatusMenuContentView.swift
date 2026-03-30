@@ -41,17 +41,14 @@ struct StatusMenuContentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Tab bar
-            HStack(spacing: 4) {
-                ForEach(enabledProviders) { provider in
-                    ProviderTab(
-                        provider: provider,
-                        isSelected: activeProvider == provider,
-                        indicator: store.summaries[provider]?.status.indicator
-                    ) {
-                        selectedProvider = provider
-                    }
-                }
+            // Tab bar (3-column grid)
+            ProviderTabGrid(
+                providers: enabledProviders,
+                activeProvider: activeProvider,
+                summaries: store.summaries,
+                settings: store.settings
+            ) { provider in
+                selectedProvider = provider
             }
             .padding(.horizontal, 10)
             .padding(.top, 10)
@@ -103,6 +100,7 @@ struct StatusMenuContentView: View {
                             Image(systemName: "arrow.clockwise")
                         }
                         .help("Refresh")
+                        .modifier(FooterIconHover())
                     }
 
                     Button {
@@ -112,6 +110,7 @@ struct StatusMenuContentView: View {
                         Image(systemName: "gearshape")
                     }
                     .help("Settings")
+                    .modifier(FooterIconHover())
 
                     Button {
                         NSApplication.shared.terminate(nil)
@@ -119,8 +118,9 @@ struct StatusMenuContentView: View {
                         Image(systemName: "power")
                     }
                     .help("Quit")
+                    .modifier(FooterIconHover())
                 }
-                .buttonStyle(FooterIconButtonStyle())
+                .buttonStyle(.plain)
                 .font(.system(size: 13))
             }
             .padding(10)
@@ -199,10 +199,50 @@ struct StatusMenuContentView: View {
     }
 }
 
+// MARK: - Provider Tab Grid
+
+private struct ProviderTabGrid: View {
+    let providers: [ProviderConfig]
+    let activeProvider: ProviderConfig?
+    let summaries: [ProviderConfig: StatuspageSummary]
+    let settings: SettingsStore
+    let onSelect: (ProviderConfig) -> Void
+
+    private let columns = 3
+
+    var body: some View {
+        Grid(horizontalSpacing: 4, verticalSpacing: 4) {
+            ForEach(0..<rowCount, id: \.self) { rowIndex in
+                GridRow {
+                    ForEach(0..<columns, id: \.self) { col in
+                        let index = rowIndex * columns + col
+                        if index < providers.count {
+                            let provider = providers[index]
+                            ProviderTab(
+                                name: settings.displayName(for: provider),
+                                isSelected: activeProvider == provider,
+                                indicator: summaries[provider]?.status.indicator
+                            ) {
+                                onSelect(provider)
+                            }
+                        } else {
+                            Color.clear.gridCellUnsizedAxes(.vertical)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var rowCount: Int {
+        (providers.count + columns - 1) / columns
+    }
+}
+
 // MARK: - Provider Tab
 
 struct ProviderTab: View {
-    let provider: ProviderConfig
+    let name: String
     let isSelected: Bool
     let indicator: StatusIndicator?
     let action: () -> Void
@@ -217,21 +257,21 @@ struct ProviderTab: View {
                         .fill(indicator.color)
                         .frame(width: 6, height: 6)
                 }
-                Text(provider.displayName)
+                Text(name)
                     .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
             .foregroundStyle(isSelected ? .primary : .secondary)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 6)
             .padding(.horizontal, 6)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(isSelected ? Color.primary.opacity(0.1) : isHovered ? Color.primary.opacity(0.05) : .clear)
+                    .animation(.easeInOut(duration: 0.15), value: isSelected)
+                    .animation(.easeInOut(duration: 0.15), value: isHovered)
             )
-            .animation(.easeInOut(duration: 0.15), value: isSelected)
-            .animation(.easeInOut(duration: 0.15), value: isHovered)
         }
         .buttonStyle(.plain)
         .onHover { hovering in
@@ -240,17 +280,15 @@ struct ProviderTab: View {
     }
 }
 
-// MARK: - Footer Icon Button Style
+// MARK: - Footer Icon Hover
 
-struct FooterIconButtonStyle: ButtonStyle {
+private struct FooterIconHover: ViewModifier {
     @State private var isHovered = false
 
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
+    func body(content: Content) -> some View {
+        content
             .foregroundStyle(isHovered ? .primary : .secondary)
             .animation(.easeInOut(duration: 0.15), value: isHovered)
-            .onHover { hovering in
-                isHovered = hovering
-            }
+            .onHover { isHovered = $0 }
     }
 }

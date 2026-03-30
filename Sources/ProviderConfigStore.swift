@@ -1,7 +1,7 @@
 import Foundation
 import Observation
 
-@Observable
+@MainActor @Observable
 final class ProviderConfigStore {
     private(set) var providers: [ProviderConfig] = ProviderConfig.builtInProviders
     private let fileURL: URL
@@ -33,12 +33,13 @@ final class ProviderConfigStore {
         guard !isEnabled || enabledCount > 1 else { return }
         providers.removeAll { $0.id == id }
         settings.disabledProviderIDs.remove(id)
+        settings.providerOrder.removeAll { $0 == id }
         saveToDisk()
     }
 
     // MARK: - Auto-detect
 
-    static func detect(url: URL) async throws -> ProviderConfig {
+    nonisolated static func detect(url: URL) async throws -> ProviderConfig {
         let apiURL = url.appendingPathComponent("api/v2/summary.json")
         let (data, response) = try await URLSession.shared.data(from: apiURL)
         try StatusClient.validateHTTPResponse(response, for: apiURL)
@@ -57,7 +58,7 @@ final class ProviderConfigStore {
         )
     }
 
-    private static func detectPlatform(url: URL) async throws -> StatusPlatform {
+    nonisolated private static func detectPlatform(url: URL) async throws -> StatusPlatform {
         let (data, _) = try await URLSession.shared.data(from: url)
         guard let html = String(data: data, encoding: .utf8) else {
             return .atlassianStatuspage

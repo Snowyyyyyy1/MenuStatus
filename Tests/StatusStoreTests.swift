@@ -2,8 +2,10 @@ import XCTest
 @testable import MenuStatus
 
 final class StatusStoreTests: XCTestCase {
+    @MainActor
     func testUnhealthyGroupsAutoExpandUntilUserOverridesThem() {
-        let store = StatusStore(settings: SettingsStore())
+        let store = StatusStore(settings: SettingsStore(providerConfigs: ProviderConfigStore()))
+        let provider = ProviderConfig.openAI
         let unhealthySection = GroupedComponentSection(
             id: "codex",
             title: "Codex",
@@ -12,11 +14,11 @@ final class StatusStoreTests: XCTestCase {
             timeline: nil
         )
 
-        XCTAssertTrue(store.isExpanded(unhealthySection))
+        XCTAssertTrue(store.isExpanded(unhealthySection, provider: provider))
 
-        store.toggleExpansion(for: unhealthySection)
+        store.toggleExpansion(for: unhealthySection, provider: provider)
 
-        XCTAssertFalse(store.isExpanded(unhealthySection))
+        XCTAssertFalse(store.isExpanded(unhealthySection, provider: provider))
     }
 
     func testParseOpenAIOfficialHistoryHTMLExtractsStructureAndMetrics() throws {
@@ -188,7 +190,7 @@ final class StatusStoreTests: XCTestCase {
     }
 
     func testBuildFromImpactsUsesProvidedTimeZoneAndAvailabilityDate() throws {
-        let now = try XCTUnwrap(ComponentTimeline.parseISODate("2026-03-23T12:00:00Z"))
+        let now = try XCTUnwrap(DateParsing.parseISODate("2026-03-23T12:00:00Z"))
         let impacts = [
             OfficialComponentImpact(
                 componentId: "claude",

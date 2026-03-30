@@ -8,6 +8,7 @@ enum MenuBarIconStyle: Int, CaseIterable {
     case tinted = 2
 }
 
+@MainActor
 @Observable
 final class SettingsStore {
     var refreshInterval: TimeInterval {
@@ -31,9 +32,24 @@ final class SettingsStore {
         didSet { UserDefaults.standard.set(iconStyle.rawValue, forKey: Keys.iconStyle) }
     }
 
+    var customProviderNames: [String: String] {
+        didSet { UserDefaults.standard.set(customProviderNames, forKey: Keys.customProviderNames) }
+    }
+
+    var providerOrder: [String] {
+        didSet { UserDefaults.standard.set(providerOrder, forKey: Keys.providerOrder) }
+    }
+
+    func displayName(for provider: ProviderConfig) -> String {
+        if let custom = customProviderNames[provider.id], !custom.isEmpty {
+            return custom
+        }
+        return provider.displayName
+    }
+
     let providerConfigs: ProviderConfigStore
 
-    init(providerConfigs: ProviderConfigStore = ProviderConfigStore()) {
+    init(providerConfigs: ProviderConfigStore) {
         let defaults = UserDefaults.standard
 
         if let interval = defaults.object(forKey: Keys.refreshInterval) as? TimeInterval, interval > 0 {
@@ -51,6 +67,8 @@ final class SettingsStore {
         }
 
         self.iconStyle = MenuBarIconStyle(rawValue: defaults.integer(forKey: Keys.iconStyle)) ?? .outline
+        self.customProviderNames = (defaults.dictionary(forKey: Keys.customProviderNames) as? [String: String]) ?? [:]
+        self.providerOrder = defaults.stringArray(forKey: Keys.providerOrder) ?? []
         self.providerConfigs = providerConfigs
     }
 
@@ -69,8 +87,9 @@ final class SettingsStore {
     }
 
     private func updateLoginItem() {
-        try? SMAppService.mainApp.register()
-        if !launchAtLogin {
+        if launchAtLogin {
+            try? SMAppService.mainApp.register()
+        } else {
             try? SMAppService.mainApp.unregister()
         }
     }
@@ -80,11 +99,25 @@ final class SettingsStore {
         static let launchAtLogin = "launchAtLogin"
         static let disabledProviderIDs = "disabledProviderIDs"
         static let iconStyle = "iconStyle"
+        static let customProviderNames = "customProviderNames"
+        static let providerOrder = "providerOrder"
     }
 }
 
 extension ProviderConfigStore {
+    func orderedProviders(settings: SettingsStore) -> [ProviderConfig] {
+        let all = allProviders
+        if settings.providerOrder.isEmpty {
+            return all
+        }
+        return all.sorted { a, b in
+            let ai = settings.providerOrder.firstIndex(of: a.id) ?? Int.max
+            let bi = settings.providerOrder.firstIndex(of: b.id) ?? Int.max
+            return ai < bi
+        }
+    }
+
     func enabledProviders(settings: SettingsStore) -> [ProviderConfig] {
-        allProviders.filter { settings.isEnabled($0) }
+        orderedProviders(settings: settings).filter { settings.isEnabled($0) }
     }
 }

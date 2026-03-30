@@ -7,7 +7,7 @@ struct MenuStatusApp: App {
     @State private var settings: SettingsStore
     @State private var store: StatusStore
     @State private var isMenuPresented: Bool = false
-    @StateObject private var updaterService = UpdaterService()
+    @State private var updaterService = UpdaterService()
 
     init() {
         let providerConfigs = ProviderConfigStore()
