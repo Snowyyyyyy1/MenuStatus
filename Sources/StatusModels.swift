@@ -607,9 +607,16 @@ struct ComponentTimeline {
             return .noData
         case "76ad2a":
             return .operational
+        case "f1c40f":
+            return .degraded
+        case "e67e22":
+            return .partialOutage
+        case "e74c3c":
+            return .majorOutage
         case "2c84db":
             return .maintenance
         default:
+            // Fallback heuristic for custom-themed status pages
             let (r, g, _) = rgbComponents(for: fill)
             if r > 210 && g < 120 {
                 return .majorOutage

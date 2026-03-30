@@ -13,6 +13,7 @@ struct StatusMenuContentView: View {
     @State private var contentHeights: [ProviderConfig: CGFloat] = [:]
     @State private var tooltipState = TooltipState()
     @State private var tooltipHeight: CGFloat = 0
+    @State private var initialMeasurementDone = false
 
     private var enabledProviders: [ProviderConfig] {
         store.settings.providerConfigs.enabledProviders(settings: store.settings)
@@ -126,6 +127,7 @@ struct StatusMenuContentView: View {
             .padding(10)
         }
         .frame(width: MenuContentSizing.width)
+        .opacity(initialMeasurementDone ? 1 : 0)
         .coordinateSpace(name: "menu")
         .environment(tooltipState)
         .overlay(alignment: .topLeading) {
@@ -166,6 +168,9 @@ struct StatusMenuContentView: View {
                     Color.clear.onAppear {
                         if let provider = activeProvider {
                             contentHeights[provider] = proxy.size.height
+                            if !initialMeasurementDone {
+                                initialMeasurementDone = true
+                            }
                         }
                     }
                     .onChange(of: proxy.size.height) { _, newHeight in

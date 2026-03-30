@@ -117,18 +117,12 @@ struct StatusClient {
         guard let html = String(data: data, encoding: .utf8) else { return [:] }
         let decodedBlocks = (try? extractDecodedNextBlocks(from: html)) ?? []
 
+        let regex = /"id":"([^"]+)"[^}]*?"name":"([^"]+)"/.dotMatchesNewlines()
         var names: [String: String] = [:]
         for block in decodedBlocks {
-            // Find incident objects with "id" and "name" fields
-            let pattern = #""id":"([^"]+)"[^}]*?"name":"([^"]+)""#
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else { continue }
-            let range = NSRange(block.startIndex..<block.endIndex, in: block)
-            for match in regex.matches(in: block, range: range) {
-                guard match.numberOfRanges == 3,
-                      let idRange = Range(match.range(at: 1), in: block),
-                      let nameRange = Range(match.range(at: 2), in: block) else { continue }
-                let id = String(block[idRange])
-                let name = String(block[nameRange])
+            for match in block.matches(of: regex) {
+                let id = String(match.1)
+                let name = String(match.2)
                 // Only store incident-like IDs (not component/group IDs)
                 if id.count > 20 {
                     names[id] = name
@@ -139,33 +133,17 @@ struct StatusClient {
     }
 
     private static func parseGeneratedAt(in text: String) -> Date? {
-        let pattern = #""initialNow":\{"isoDate":"([^"]+)""#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(
-                in: text,
-                range: NSRange(text.startIndex..<text.endIndex, in: text)
-              ),
-              match.numberOfRanges > 1,
-              let range = Range(match.range(at: 1), in: text) else {
+        guard let match = text.firstMatch(of: /"initialNow":\{"isoDate":"([^"]+)"/) else {
             return nil
         }
-
-        return DateParsing.parseISODate(String(text[range]))
+        return DateParsing.parseISODate(String(match.1))
     }
 
     private static func parseStatuspageGeneratedAt(in html: String) -> Date? {
-        let pattern = #"<meta\s+name="issued"\s+content="([0-9]+)""#
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
-              let match = regex.firstMatch(
-                in: html,
-                range: NSRange(html.startIndex..<html.endIndex, in: html)
-              ),
-              match.numberOfRanges > 1,
-              let range = Range(match.range(at: 1), in: html),
-              let issued = TimeInterval(html[range]) else {
+        guard let match = html.firstMatch(of: /<meta\s+name="issued"\s+content="([0-9]+)"/.ignoresCase()),
+              let issued = TimeInterval(match.1) else {
             return nil
         }
-
         return Date(timeIntervalSince1970: issued)
     }
 
@@ -226,22 +204,16 @@ struct StatusClient {
     }
 
     private static func parseStatuspageComponentBlock(_ html: String) -> OfficialHistoryComponent? {
-        guard let componentId = firstMatch(in: html, pattern: #"<div\s+data-component-id="([^"]+)""#, group: 1),
-              let name = firstMatch(in: html, pattern: #"<span class="name">\s*(.*?)\s*</span>"#, group: 1),
-              let svg = firstMatch(
-                in: html,
-                pattern: #"<svg class="availability-time-line-graphic".*?>(.*?)</svg>"#,
-                group: 1,
-                options: [.dotMatchesLineSeparators]
-              ),
-              let uptimeString = firstMatch(
-                in: html,
-                pattern: #"<span id="uptime-percent-[^"]+">\s*<var data-var="uptime-percent">([0-9]+(?:\.[0-9]+)?)</var>"#,
-                group: 1
-              ),
-              let uptimePercent = Double(uptimeString) else {
+        guard let componentIdMatch = html.firstMatch(of: /<div\s+data-component-id="([^"]+)"/),
+              let nameMatch = html.firstMatch(of: /<span class="name">\s*(.*?)\s*<\/span>/),
+              let svgMatch = html.firstMatch(of: /<svg class="availability-time-line-graphic".*?>(.*?)<\/svg>/.dotMatchesNewlines()),
+              let uptimeMatch = html.firstMatch(of: /<span id="uptime-percent-[^"]+">\s*<var data-var="uptime-percent">([0-9]+(?:\.[0-9]+)?)<\/var>/),
+              let uptimePercent = Double(uptimeMatch.1) else {
             return nil
         }
+        let componentId = String(componentIdMatch.1)
+        let name = String(nameMatch.1)
+        let svg = String(svgMatch.1)
 
         let fills = extractStatuspageFills(from: svg)
         guard !fills.isEmpty else { return nil }
@@ -258,20 +230,11 @@ struct StatusClient {
     }
 
     private static func extractStatuspageFills(from svg: String) -> [String] {
-        let pattern = #"<rect[^>]*\bfill="(#[0-9A-Fa-f]{6})"[^>]*class="[^"]*\buptime-day\b[^"]*\bday-([0-9]+)\b[^"]*"[^>]*/?>"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-        let range = NSRange(svg.startIndex..<svg.endIndex, in: svg)
-
-        let indexedFills: [(Int, String)] = regex.matches(in: svg, options: [], range: range).compactMap { match in
-            guard match.numberOfRanges == 3,
-                  let fillRange = Range(match.range(at: 1), in: svg),
-                  let dayRange = Range(match.range(at: 2), in: svg),
-                  let day = Int(svg[dayRange]) else {
-                return nil
-            }
-            return (day, String(svg[fillRange]))
+        let regex = /<rect[^>]*\bfill="(#[0-9A-Fa-f]{6})"[^>]*class="[^"]*\buptime-day\b[^"]*\bday-([0-9]+)\b[^"]*"[^>]*\/?>/
+        let indexedFills: [(Int, String)] = svg.matches(of: regex).compactMap { match in
+            guard let day = Int(match.2) else { return nil }
+            return (day, String(match.1))
         }
-
         return indexedFills.sorted { $0.0 < $1.0 }.map(\.1)
     }
 
@@ -295,36 +258,10 @@ struct StatusClient {
         return positions
     }
 
-    private static func firstMatch(
-        in text: String,
-        pattern: String,
-        group: Int,
-        options: NSRegularExpression.Options = [.caseInsensitive]
-    ) -> String? {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: options),
-              let match = regex.firstMatch(
-                in: text,
-                range: NSRange(text.startIndex..<text.endIndex, in: text)
-              ),
-              match.numberOfRanges > group,
-              let range = Range(match.range(at: group), in: text) else {
-            return nil
-        }
-
-        return String(text[range])
-    }
-
     private static func extractDecodedNextBlocks(from html: String) throws -> [String] {
-        let pattern = #"self\.__next_f\.push\(\[1,"(.*?)"\]\)</script>"#
-        let regex = try NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators])
-        let nsRange = NSRange(html.startIndex..<html.endIndex, in: html)
-
-        return try regex.matches(in: html, options: [], range: nsRange).compactMap { match in
-            guard match.numberOfRanges > 1,
-                  let range = Range(match.range(at: 1), in: html) else {
-                return nil
-            }
-            let raw = String(html[range])
+        let regex = /self\.__next_f\.push\(\[1,"(.*?)"\]\)<\/script>/.dotMatchesNewlines()
+        return try html.matches(of: regex).compactMap { match in
+            let raw = String(match.1)
             return try decodeJSONStringLiteral(raw)
         }
     }
@@ -391,17 +328,11 @@ struct StatusClient {
         guard let html = String(data: data, encoding: .utf8) else { return [] }
 
         // Extract data-react-props JSON
-        let propsPattern = #"data-react-props="([^"]*)"#
-        guard let propsRegex = try? NSRegularExpression(pattern: propsPattern),
-              let propsMatch = propsRegex.firstMatch(
-                in: html,
-                range: NSRange(html.startIndex..<html.endIndex, in: html)
-              ),
-              let propsRange = Range(propsMatch.range(at: 1), in: html) else {
+        guard let propsMatch = html.firstMatch(of: /data-react-props="([^"]*)/) else {
             return []
         }
 
-        let escaped = String(html[propsRange])
+        let escaped = String(propsMatch.1)
         let unescaped = decodeHTML(escaped)
         guard let propsData = unescaped.data(using: .utf8),
               let props = try? JSONSerialization.jsonObject(with: propsData) as? [String: Any],
@@ -435,22 +366,11 @@ struct StatusClient {
                 let impact = impactStr.flatMap { StatusIndicator(rawValue: $0) }
 
                 // Parse day from: "Mar <var data-var='date'>29</var>, ..."
-                let dayPattern = #"data-var='date'>(\d+)</var>"#
-                guard let dayRegex = try? NSRegularExpression(pattern: dayPattern),
-                      let dayMatch = dayRegex.firstMatch(
-                        in: timestamp,
-                        range: NSRange(timestamp.startIndex..<timestamp.endIndex, in: timestamp)
-                      ),
-                      let dayRange = Range(dayMatch.range(at: 1), in: timestamp),
-                      let day = Int(timestamp[dayRange]) else { continue }
+                guard let dayMatch = timestamp.firstMatch(of: /data-var='date'>(\d+)<\/var>/),
+                      let day = Int(dayMatch.1) else { continue }
 
                 // Parse times from: "<var data-var='time'>00:53</var> - <var data-var='time'>04:44</var>"
-                let timePattern = #"data-var='time'>(\d{2}:\d{2})</var>"#
-                let timeRegex = (try? NSRegularExpression(pattern: timePattern)) ?? NSRegularExpression()
-                let timeMatches = timeRegex.matches(
-                    in: timestamp,
-                    range: NSRange(timestamp.startIndex..<timestamp.endIndex, in: timestamp)
-                )
+                let timeMatches = timestamp.matches(of: /data-var='time'>(\d{2}:\d{2})<\/var>/)
 
                 var comps = DateComponents()
                 comps.year = year
@@ -463,11 +383,9 @@ struct StatusClient {
                 var startDate = baseDate
                 var endDate = baseDate.addingTimeInterval(3600) // default 1 hour
 
-                if timeMatches.count >= 2,
-                   let startRange = Range(timeMatches[0].range(at: 1), in: timestamp),
-                   let endRange = Range(timeMatches[1].range(at: 1), in: timestamp) {
-                    let startTime = String(timestamp[startRange])
-                    let endTime = String(timestamp[endRange])
+                if timeMatches.count >= 2 {
+                    let startTime = String(timeMatches[0].1)
+                    let endTime = String(timeMatches[1].1)
                     let startParts = startTime.split(separator: ":").compactMap { Int($0) }
                     let endParts = endTime.split(separator: ":").compactMap { Int($0) }
                     if startParts.count == 2 {
@@ -480,9 +398,8 @@ struct StatusClient {
                         }
                         endDate = baseDate.addingTimeInterval(endOffset)
                     }
-                } else if timeMatches.count == 1,
-                          let startRange = Range(timeMatches[0].range(at: 1), in: timestamp) {
-                    let startTime = String(timestamp[startRange])
+                } else if timeMatches.count == 1 {
+                    let startTime = String(timeMatches[0].1)
                     let parts = startTime.split(separator: ":").compactMap { Int($0) }
                     if parts.count == 2 {
                         startDate = baseDate.addingTimeInterval(TimeInterval(parts[0] * 3600 + parts[1] * 60))
