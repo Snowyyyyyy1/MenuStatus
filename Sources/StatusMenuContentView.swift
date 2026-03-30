@@ -42,7 +42,7 @@ struct StatusMenuContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Tab bar
-            HStack(spacing: 8) {
+            HStack(spacing: 4) {
                 ForEach(enabledProviders) { provider in
                     ProviderTab(
                         provider: provider,
@@ -120,9 +120,8 @@ struct StatusMenuContentView: View {
                     }
                     .help("Quit")
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(FooterIconButtonStyle())
                 .font(.system(size: 13))
-                .foregroundStyle(.secondary)
             }
             .padding(10)
         }
@@ -208,6 +207,8 @@ struct ProviderTab: View {
     let indicator: StatusIndicator?
     let action: () -> Void
 
+    @State private var isHovered = false
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
@@ -218,16 +219,38 @@ struct ProviderTab: View {
                 }
                 Text(provider.displayName)
                     .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
             .foregroundStyle(isSelected ? .primary : .secondary)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 6)
+            .padding(.horizontal, 6)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isSelected ? Color.primary.opacity(0.1) : .clear)
+                    .fill(isSelected ? Color.primary.opacity(0.1) : isHovered ? Color.primary.opacity(0.05) : .clear)
             )
             .animation(.easeInOut(duration: 0.15), value: isSelected)
+            .animation(.easeInOut(duration: 0.15), value: isHovered)
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+    }
+}
+
+// MARK: - Footer Icon Button Style
+
+struct FooterIconButtonStyle: ButtonStyle {
+    @State private var isHovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(isHovered ? .primary : .secondary)
+            .animation(.easeInOut(duration: 0.15), value: isHovered)
+            .onHover { hovering in
+                isHovered = hovering
+            }
     }
 }

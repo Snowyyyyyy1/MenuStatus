@@ -91,15 +91,20 @@ struct GroupHeaderView: View {
     let store: StatusStore
     let dayDetails: [Date: [DayIncidentDetail]]
 
+    @State private var isHovered = false
+
     var body: some View {
         Button {
             store.toggleExpansion(for: section)
         } label: {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .center, spacing: 8) {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(isHovered ? .primary : .tertiary)
+                        .scaleEffect(isHovered ? 1.2 : 1.0)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .animation(.easeInOut(duration: 0.2), value: isExpanded)
 
                     Text(section.title)
                         .font(.system(size: 13, weight: .semibold))
@@ -125,6 +130,10 @@ struct GroupHeaderView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .animation(.easeInOut(duration: 0.15), value: isHovered)
     }
 }
 
@@ -177,7 +186,9 @@ struct UptimeBarWithLabels: View {
                     .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
                 Spacer()
-                Text(timeline.hasMeasuredDays ? String(format: "%.2f%% uptime", timeline.uptimePercent) : "No data")
+                Text(timeline.hasMeasuredDays
+                    ? String(format: "%@%.2f%% uptime", timeline.isEstimated ? "≈ " : "", timeline.uptimePercent)
+                    : "No data")
                     .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(.secondary)
                 Spacer()

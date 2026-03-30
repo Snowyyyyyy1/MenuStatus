@@ -161,18 +161,7 @@ final class StatusStore {
                 errorMessage = errors.joined(separator: "\n")
             }
 
-            let derivedState = Self.derivePresentationState(
-                providers: activeProviders,
-                summaries: stagedSummaries,
-                currentTimelines: componentTimelines.filter { activeSet.contains($0.key) },
-                currentSections: groupedSections.filter { activeSet.contains($0.key) },
-                officialHistories: officialHistories
-            )
-
-            summaries = stagedSummaries
-            componentTimelines = derivedState.timelines
-            groupedSections = derivedState.sections
-            incidentLookup = Self.buildIncidentLookup(
+            let builtIncidentLookup = Self.buildIncidentLookup(
                 providers: activeProviders,
                 incidents: fetchedIncidents,
                 maintenances: fetchedMaintenances,
@@ -180,6 +169,20 @@ final class StatusStore {
                 officialHistories: officialHistories,
                 summaries: stagedSummaries
             )
+
+            let derivedState = Self.derivePresentationState(
+                providers: activeProviders,
+                summaries: stagedSummaries,
+                currentTimelines: componentTimelines.filter { activeSet.contains($0.key) },
+                currentSections: groupedSections.filter { activeSet.contains($0.key) },
+                officialHistories: officialHistories,
+                incidentLookup: builtIncidentLookup
+            )
+
+            summaries = stagedSummaries
+            componentTimelines = derivedState.timelines
+            groupedSections = derivedState.sections
+            incidentLookup = builtIncidentLookup
         }
 
         lastRefreshed = Date()
@@ -354,7 +357,8 @@ extension StatusStore {
         summaries: [ProviderConfig: StatuspageSummary],
         currentTimelines: [ProviderConfig: [String: ComponentTimeline]],
         currentSections: [ProviderConfig: [GroupedComponentSection]],
-        officialHistories: [ProviderConfig: OfficialHistorySnapshot]
+        officialHistories: [ProviderConfig: OfficialHistorySnapshot],
+        incidentLookup: [ProviderConfig: [String: [Date: [DayIncidentDetail]]]] = [:]
     ) -> (
         timelines: [ProviderConfig: [String: ComponentTimeline]],
         sections: [ProviderConfig: [GroupedComponentSection]]
@@ -370,6 +374,8 @@ extension StatusStore {
                 continue
             }
 
+            let providerIncidents = incidentLookup[provider] ?? [:]
+
             if !officialHistory.groups.isEmpty {
                 let projection = buildGroupedSections(
                     snapshot: officialHistory,
@@ -380,14 +386,16 @@ extension StatusStore {
             } else if summary.components.contains(where: { $0.group == true }) {
                 let projection = buildGroupedSectionsFromSummary(
                     snapshot: officialHistory,
-                    summary: summary
+                    summary: summary,
+                    incidentLookup: providerIncidents
                 )
                 nextTimelines[provider] = projection.timelines
                 nextSections[provider] = projection.sections
             } else {
                 nextTimelines[provider] = buildFlatTimelines(
                     snapshot: officialHistory,
-                    summary: summary
+                    summary: summary,
+                    incidentLookup: providerIncidents
                 )
                 nextSections[provider] = []
             }
@@ -398,7 +406,8 @@ extension StatusStore {
 
     static func buildFlatTimelines(
         snapshot: OfficialHistorySnapshot,
-        summary: StatuspageSummary
+        summary: StatuspageSummary,
+        incidentLookup: [String: [Date: [DayIncidentDetail]]] = [:]
     ) -> [String: ComponentTimeline] {
         let now = snapshot.generatedAt ?? Date()
         var timelines: [String: ComponentTimeline] = [:]
@@ -410,8 +419,9 @@ extension StatusStore {
                     now: now,
                     timeZoneIdentifier: summary.page.timeZone
                 )
-            } else {
-                timelines[component.id] = ComponentTimeline.buildUnavailable(
+            } else if let dayDetails = incidentLookup[component.id] {
+                timelines[component.id] = ComponentTimeline.buildEstimated(
+                    from: dayDetails,
                     title: component.name,
                     now: now,
                     timeZoneIdentifier: summary.page.timeZone
@@ -491,7 +501,8 @@ extension StatusStore {
 
     static func buildGroupedSectionsFromSummary(
         snapshot: OfficialHistorySnapshot,
-        summary: StatuspageSummary
+        summary: StatuspageSummary,
+        incidentLookup: [String: [Date: [DayIncidentDetail]]] = [:]
     ) -> (sections: [GroupedComponentSection], timelines: [String: ComponentTimeline]) {
         let now = snapshot.generatedAt ?? Date()
         let groupComponents = summary.components.filter { $0.group == true }
@@ -510,9 +521,11 @@ extension StatusStore {
                         from: officialComp, now: now,
                         timeZoneIdentifier: summary.page.timeZone
                     )
-                } else {
-                    timelines[child.id] = ComponentTimeline.buildUnavailable(
-                        title: child.name, now: now,
+                } else if let dayDetails = incidentLookup[child.id] {
+                    timelines[child.id] = ComponentTimeline.buildEstimated(
+                        from: dayDetails,
+                        title: child.name,
+                        now: now,
                         timeZoneIdentifier: summary.page.timeZone
                     )
                 }

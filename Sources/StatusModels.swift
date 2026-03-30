@@ -360,6 +360,7 @@ enum TimelineDayLevel: Int, Comparable {
 struct ComponentTimeline {
     let days: [DayStatus]
     let uptimePercent: Double
+    var isEstimated: Bool = false
 
     var hasMeasuredDays: Bool {
         days.contains { $0.level != .noData }
@@ -495,6 +496,36 @@ struct ComponentTimeline {
         let healthyDays = days.filter { $0.level == .operational }.count
         let uptime = uptimePercentOverride ?? (Double(healthyDays) / Double(days.count) * 100.0)
         return ComponentTimeline(days: days, uptimePercent: uptime)
+    }
+
+    static func buildEstimated(
+        from dayDetails: [Date: [DayIncidentDetail]],
+        title: String,
+        now: Date,
+        numDays: Int = 90,
+        timeZoneIdentifier: String? = nil
+    ) -> ComponentTimeline {
+        let calendar = configuredCalendar(timeZoneIdentifier: timeZoneIdentifier)
+        let today = calendar.startOfDay(for: now)
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.dateFormat = "M/d"
+
+        let days: [DayStatus] = (0..<numDays).reversed().map { offset in
+            let date = calendar.date(byAdding: .day, value: -offset, to: today)!
+            let label = formatter.string(from: date)
+            let details = dayDetails[date] ?? []
+            let level = details.map(\.level).max() ?? .operational
+            return DayStatus(
+                date: date,
+                level: level,
+                tooltip: "\(label): \(title) \(level.displayName)"
+            )
+        }
+
+        let healthyDays = days.filter { $0.level == .operational }.count
+        let uptime = Double(healthyDays) / Double(days.count) * 100.0
+        return ComponentTimeline(days: days, uptimePercent: uptime, isEstimated: true)
     }
 
     static func aggregate(
