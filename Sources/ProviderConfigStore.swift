@@ -3,14 +3,15 @@ import Observation
 
 @MainActor @Observable
 final class ProviderConfigStore {
-    private(set) var providers: [ProviderConfig] = ProviderConfig.builtInProviders
+    private(set) var providers: [ProviderConfig]
     private let fileURL: URL
 
-    init() {
+    init(removedBuiltInIDs: Set<String> = []) {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let dir = appSupport.appendingPathComponent("MenuStatus", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         self.fileURL = dir.appendingPathComponent("providers.json")
+        self.providers = ProviderConfig.builtInProviders.filter { !removedBuiltInIDs.contains($0.id) }
         loadFromDisk()
     }
 
@@ -27,14 +28,27 @@ final class ProviderConfigStore {
     }
 
     func removeProvider(id: String, settings: SettingsStore) {
-        guard providers.first(where: { $0.id == id })?.isBuiltIn != true else { return }
+        guard let provider = providers.first(where: { $0.id == id }) else { return }
         let enabledCount = providers.filter { settings.isEnabled($0) }.count
         let isEnabled = !settings.disabledProviderIDs.contains(id)
         guard !isEnabled || enabledCount > 1 else { return }
+
         providers.removeAll { $0.id == id }
         settings.disabledProviderIDs.remove(id)
         settings.providerOrder.removeAll { $0 == id }
-        saveToDisk()
+
+        if provider.isBuiltIn {
+            settings.removedBuiltInIDs.insert(id)
+        } else {
+            saveToDisk()
+        }
+    }
+
+    func resetBuiltInProviders(settings: SettingsStore) {
+        settings.removedBuiltInIDs.removeAll()
+        for builtIn in ProviderConfig.builtInProviders where !providers.contains(where: { $0.id == builtIn.id }) {
+            providers.append(builtIn)
+        }
     }
 
     // MARK: - Auto-detect

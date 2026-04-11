@@ -40,6 +40,18 @@ final class SettingsStore {
         didSet { UserDefaults.standard.set(providerOrder, forKey: Keys.providerOrder) }
     }
 
+    var removedBuiltInIDs: Set<String> {
+        didSet {
+            UserDefaults.standard.set(Array(removedBuiltInIDs), forKey: Keys.removedBuiltInIDs)
+        }
+    }
+
+    var benchmarkSectionExpanded: Set<String> {
+        didSet {
+            UserDefaults.standard.set(Array(benchmarkSectionExpanded), forKey: Keys.benchmarkSectionExpanded)
+        }
+    }
+
     func displayName(for provider: ProviderConfig) -> String {
         if let custom = customProviderNames[provider.id], !custom.isEmpty {
             return custom
@@ -47,9 +59,9 @@ final class SettingsStore {
         return provider.displayName
     }
 
-    let providerConfigs: ProviderConfigStore
+    private(set) var providerConfigs: ProviderConfigStore!
 
-    init(providerConfigs: ProviderConfigStore) {
+    init() {
         let defaults = UserDefaults.standard
 
         if let interval = defaults.object(forKey: Keys.refreshInterval) as? TimeInterval, interval > 0 {
@@ -69,7 +81,12 @@ final class SettingsStore {
         self.iconStyle = MenuBarIconStyle(rawValue: defaults.integer(forKey: Keys.iconStyle)) ?? .outline
         self.customProviderNames = (defaults.dictionary(forKey: Keys.customProviderNames) as? [String: String]) ?? [:]
         self.providerOrder = defaults.stringArray(forKey: Keys.providerOrder) ?? []
-        self.providerConfigs = providerConfigs
+        self.removedBuiltInIDs = Set(defaults.stringArray(forKey: Keys.removedBuiltInIDs) ?? [])
+        self.benchmarkSectionExpanded = Set(defaults.stringArray(forKey: Keys.benchmarkSectionExpanded) ?? [])
+    }
+
+    func attachProviderConfigs(_ store: ProviderConfigStore) {
+        self.providerConfigs = store
     }
 
     func isEnabled(_ provider: ProviderConfig) -> Bool {
@@ -101,6 +118,8 @@ final class SettingsStore {
         static let iconStyle = "iconStyle"
         static let customProviderNames = "customProviderNames"
         static let providerOrder = "providerOrder"
+        static let removedBuiltInIDs = "removedBuiltInIDs"
+        static let benchmarkSectionExpanded = "benchmarkSectionExpanded"
     }
 }
 
