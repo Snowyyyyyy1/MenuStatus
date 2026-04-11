@@ -27,6 +27,7 @@ enum DateParsing {
 enum StatusPlatform: String, Codable {
     case atlassianStatuspage
     case incidentIO
+    case aiStupidLevelOnly
 }
 
 struct ProviderConfig: Codable, Identifiable, Hashable {
@@ -35,26 +36,87 @@ struct ProviderConfig: Codable, Identifiable, Hashable {
     var baseURL: URL
     var platform: StatusPlatform
     var isBuiltIn: Bool
+    var aiStupidLevelVendor: String?
 
     var apiURL: URL { baseURL.appendingPathComponent("api/v2/summary.json") }
     var statusPageURL: URL { baseURL }
 
+    var hasStatusPage: Bool { platform != .aiStupidLevelOnly }
+
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, displayName, baseURL, platform, isBuiltIn, aiStupidLevelVendor
+    }
+
+    init(
+        id: String,
+        displayName: String,
+        baseURL: URL,
+        platform: StatusPlatform,
+        isBuiltIn: Bool,
+        aiStupidLevelVendor: String? = nil
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.baseURL = baseURL
+        self.platform = platform
+        self.isBuiltIn = isBuiltIn
+        self.aiStupidLevelVendor = aiStupidLevelVendor
+    }
 }
 
 extension ProviderConfig {
     static let openAI = ProviderConfig(
         id: "openai", displayName: "OpenAI",
         baseURL: URL(string: "https://status.openai.com")!,
-        platform: .incidentIO, isBuiltIn: true
+        platform: .incidentIO, isBuiltIn: true,
+        aiStupidLevelVendor: "openai"
     )
     static let anthropic = ProviderConfig(
         id: "anthropic", displayName: "Claude",
         baseURL: URL(string: "https://status.claude.com")!,
-        platform: .atlassianStatuspage, isBuiltIn: true
+        platform: .atlassianStatuspage, isBuiltIn: true,
+        aiStupidLevelVendor: "anthropic"
     )
-    static let builtInProviders: [ProviderConfig] = [.openAI, .anthropic]
+
+    private static let benchmarkPlaceholder = URL(string: "https://aistupidlevel.info")!
+
+    static let xai = ProviderConfig(
+        id: "xai-benchmark", displayName: "xAI",
+        baseURL: benchmarkPlaceholder,
+        platform: .aiStupidLevelOnly, isBuiltIn: true,
+        aiStupidLevelVendor: "xai"
+    )
+    static let googleAI = ProviderConfig(
+        id: "google-benchmark", displayName: "Google AI",
+        baseURL: benchmarkPlaceholder,
+        platform: .aiStupidLevelOnly, isBuiltIn: true,
+        aiStupidLevelVendor: "google"
+    )
+    static let kimi = ProviderConfig(
+        id: "kimi-benchmark", displayName: "Kimi",
+        baseURL: benchmarkPlaceholder,
+        platform: .aiStupidLevelOnly, isBuiltIn: true,
+        aiStupidLevelVendor: "kimi"
+    )
+    static let glm = ProviderConfig(
+        id: "glm-benchmark", displayName: "GLM",
+        baseURL: benchmarkPlaceholder,
+        platform: .aiStupidLevelOnly, isBuiltIn: true,
+        aiStupidLevelVendor: "glm"
+    )
+    static let deepSeek = ProviderConfig(
+        id: "deepseek-benchmark", displayName: "DeepSeek",
+        baseURL: benchmarkPlaceholder,
+        platform: .aiStupidLevelOnly, isBuiltIn: true,
+        aiStupidLevelVendor: "deepseek"
+    )
+
+    static let builtInProviders: [ProviderConfig] = [
+        .openAI, .anthropic, .xai, .googleAI, .kimi, .glm, .deepSeek,
+    ]
 }
 
 // MARK: - Statuspage API Response

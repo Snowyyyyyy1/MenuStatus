@@ -53,6 +53,8 @@ struct StatusClient {
             return snapshot
         case .atlassianStatuspage:
             return try parseAtlassianStatuspageHistoryHTML(data)
+        case .aiStupidLevelOnly:
+            return OfficialHistorySnapshot(generatedAt: nil, groups: [], componentsByID: [:], incidentNames: [:])
         }
     }
 
