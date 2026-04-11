@@ -9,78 +9,127 @@ private enum UptimeBarStyle {
 
 struct ProviderSectionView: View {
     let provider: ProviderConfig
-    let summary: StatuspageSummary
+    let summary: StatuspageSummary?
     let store: StatusStore
+    let benchmarkStore: AIStupidLevelStore
+    let settings: SettingsStore
 
     private var visibleComponents: [Component] {
-        summary.components.filter { $0.group != true }
+        (summary?.components ?? []).filter { $0.group != true }
     }
 
     private var activeIncidents: [Incident] {
-        (summary.incidents ?? []).filter { $0.status.isActive }
+        (summary?.incidents ?? []).filter { $0.status.isActive }
     }
 
     private var groupedSections: [GroupedComponentSection] {
         store.sections(for: provider)
     }
 
+    private var benchmarkSummary: BenchmarkVendorSummary? {
+        guard let vendor = provider.aiStupidLevelVendor else { return nil }
+        let s = benchmarkStore.summary(forVendor: vendor)
+        return s.isEmpty ? nil : s
+    }
+
+    private var benchmarkExpanded: Bool {
+        settings.benchmarkSectionExpanded.contains(provider.id)
+    }
+
+    private func toggleBenchmarkExpanded() {
+        if settings.benchmarkSectionExpanded.contains(provider.id) {
+            settings.benchmarkSectionExpanded.remove(provider.id)
+        } else {
+            settings.benchmarkSectionExpanded.insert(provider.id)
+        }
+    }
+
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 0) {
-            // Overall status header
-            HStack {
-                Label(summary.status.indicator.displayName, systemImage: summary.status.indicator.sfSymbol)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(summary.status.indicator.color)
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-
-            // Active incidents
-            if !activeIncidents.isEmpty {
-                ForEach(activeIncidents) { incident in
-                    IncidentRow(incident: incident)
-                }
-                .padding(.bottom, 4)
-            }
-
-            Divider()
-                .padding(.horizontal, 16)
-
-            if groupedSections.isEmpty {
-                ForEach(visibleComponents) { component in
-                    ComponentUptimeRow(
-                        component: component,
-                        timeline: store.timeline(for: provider, componentId: component.id),
-                        dayDetails: store.dayDetails(for: provider, componentId: component.id),
-                        statusPageURL: provider.statusPageURL
-                    )
-                }
+            if let summary {
+                statusPageContent(summary: summary)
             } else {
-                ForEach(groupedSections) { section in
-                    GroupHeaderView(
-                        section: section,
-                        isExpanded: store.isExpanded(section, provider: provider),
-                        provider: provider,
-                        store: store,
-                        dayDetails: store.dayDetails(for: provider, section: section)
-                    )
+                benchmarkOnlyHeader
+            }
 
-                    if store.isExpanded(section, provider: provider) {
-                        ForEach(section.components) { component in
-                            ComponentUptimeRow(
-                                component: component,
-                                timeline: store.timeline(for: provider, componentId: component.id),
-                                dayDetails: store.dayDetails(for: provider, componentId: component.id),
-                                statusPageURL: provider.statusPageURL,
-                                contentPaddingLeading: 30
-                            )
-                        }
+            if let benchmarkSummary {
+                if summary != nil {
+                    Divider().padding(.horizontal, 16).padding(.vertical, 4)
+                }
+                BenchmarkSection(
+                    summary: benchmarkSummary,
+                    isExpanded: benchmarkExpanded,
+                    onToggle: toggleBenchmarkExpanded
+                )
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private func statusPageContent(summary: StatuspageSummary) -> some View {
+        HStack {
+            Label(summary.status.indicator.displayName, systemImage: summary.status.indicator.sfSymbol)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(summary.status.indicator.color)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+
+        if !activeIncidents.isEmpty {
+            ForEach(activeIncidents) { incident in
+                IncidentRow(incident: incident)
+            }
+            .padding(.bottom, 4)
+        }
+
+        Divider()
+            .padding(.horizontal, 16)
+
+        if groupedSections.isEmpty {
+            ForEach(visibleComponents) { component in
+                ComponentUptimeRow(
+                    component: component,
+                    timeline: store.timeline(for: provider, componentId: component.id),
+                    dayDetails: store.dayDetails(for: provider, componentId: component.id),
+                    statusPageURL: provider.statusPageURL
+                )
+            }
+        } else {
+            ForEach(groupedSections) { section in
+                GroupHeaderView(
+                    section: section,
+                    isExpanded: store.isExpanded(section, provider: provider),
+                    provider: provider,
+                    store: store,
+                    dayDetails: store.dayDetails(for: provider, section: section)
+                )
+
+                if store.isExpanded(section, provider: provider) {
+                    ForEach(section.components) { component in
+                        ComponentUptimeRow(
+                            component: component,
+                            timeline: store.timeline(for: provider, componentId: component.id),
+                            dayDetails: store.dayDetails(for: provider, componentId: component.id),
+                            statusPageURL: provider.statusPageURL,
+                            contentPaddingLeading: 30
+                        )
                     }
                 }
             }
         }
-        .padding(.vertical, 4)
+    }
+
+    private var benchmarkOnlyHeader: some View {
+        HStack {
+            Label("Benchmarks only", systemImage: "chart.bar.xaxis")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
 }
 

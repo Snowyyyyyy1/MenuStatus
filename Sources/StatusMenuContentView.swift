@@ -209,23 +209,41 @@ struct StatusMenuContentView: View {
 
     @ViewBuilder
     private var selectedProviderContent: some View {
-        if let provider = activeProvider, let summary = store.summaries[provider] {
-            ProviderSectionView(
-                provider: provider,
-                summary: summary,
-                store: store
-            )
-        } else {
-            VStack(spacing: 8) {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Loading...")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        if let provider = activeProvider {
+            if provider.hasStatusPage, let summary = store.summaries[provider] {
+                ProviderSectionView(
+                    provider: provider,
+                    summary: summary,
+                    store: store,
+                    benchmarkStore: benchmarkStore,
+                    settings: store.settings
+                )
+            } else if !provider.hasStatusPage {
+                ProviderSectionView(
+                    provider: provider,
+                    summary: nil,
+                    store: store,
+                    benchmarkStore: benchmarkStore,
+                    settings: store.settings
+                )
+            } else {
+                loadingPlaceholder
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 40)
+        } else {
+            loadingPlaceholder
         }
+    }
+
+    private var loadingPlaceholder: some View {
+        VStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Loading...")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 40)
     }
 }
 
