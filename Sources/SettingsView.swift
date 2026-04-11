@@ -92,6 +92,12 @@ struct SettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
                 AddProviderRow(providerConfigs: settings.providerConfigs, store: store)
+
+                Button("Reset built-in providers") {
+                    settings.providerConfigs.resetBuiltInProviders(settings: settings)
+                }
+                .help("Restore any built-in providers you have deleted")
+                .disabled(settings.removedBuiltInIDs.isEmpty)
             }
 
             Section("Data") {

@@ -4,7 +4,9 @@ import XCTest
 final class StatusStoreTests: XCTestCase {
     @MainActor
     func testUnhealthyGroupsAutoExpandUntilUserOverridesThem() {
-        let store = StatusStore(settings: SettingsStore(providerConfigs: ProviderConfigStore()))
+        let settings = SettingsStore()
+        settings.attachProviderConfigs(ProviderConfigStore())
+        let store = StatusStore(settings: settings)
         let provider = ProviderConfig.openAI
         let unhealthySection = GroupedComponentSection(
             id: "codex",
