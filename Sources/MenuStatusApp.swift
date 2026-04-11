@@ -6,16 +6,21 @@ import SwiftUI
 struct MenuStatusApp: App {
     @State private var settings: SettingsStore
     @State private var store: StatusStore
+    @State private var benchmarkStore: AIStupidLevelStore
     @State private var isMenuPresented: Bool = false
     @State private var updaterService = UpdaterService()
 
     init() {
-        let providerConfigs = ProviderConfigStore()
-        let settings = SettingsStore(providerConfigs: providerConfigs)
+        let settings = SettingsStore()
+        let providerConfigs = ProviderConfigStore(removedBuiltInIDs: settings.removedBuiltInIDs)
+        settings.attachProviderConfigs(providerConfigs)
         let store = StatusStore(settings: settings)
         store.startPolling()
+        let benchmarkStore = AIStupidLevelStore()
+        benchmarkStore.startPolling(interval: 300)
         _settings = State(initialValue: settings)
         _store = State(initialValue: store)
+        _benchmarkStore = State(initialValue: benchmarkStore)
     }
 
     var body: some Scene {
