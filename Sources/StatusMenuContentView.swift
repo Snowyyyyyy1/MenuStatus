@@ -8,6 +8,7 @@ private enum MenuContentSizing {
 
 struct StatusMenuContentView: View {
     let store: StatusStore
+    let benchmarkStore: AIStupidLevelStore
     @Environment(\.openWindow) private var openWindow
     @State private var selectedProvider: ProviderConfig?
     @State private var contentHeights: [ProviderConfig: CGFloat] = [:]
@@ -47,7 +48,7 @@ struct StatusMenuContentView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Tab bar (3-column grid)
+            // Tab bar (3-column grid) + Global Index bar
             VStack(spacing: 0) {
                 ProviderTabGrid(
                     providers: enabledProviders,
@@ -62,6 +63,11 @@ struct StatusMenuContentView: View {
                 .padding(.bottom, 6)
 
                 Divider()
+
+                if let globalIndex = benchmarkStore.globalIndex {
+                    GlobalIndexBar(index: globalIndex)
+                    Divider()
+                }
             }
             .background {
                 GeometryReader { proxy in

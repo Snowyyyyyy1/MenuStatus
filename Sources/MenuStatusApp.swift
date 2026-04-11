@@ -25,7 +25,7 @@ struct MenuStatusApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            StatusMenuContentView(store: store)
+            StatusMenuContentView(store: store, benchmarkStore: benchmarkStore)
                 .introspectMenuBarExtraWindow { window in
                     window.animationBehavior = .utilityWindow
                 }
