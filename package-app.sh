@@ -12,10 +12,12 @@ echo "==> Generating Xcode project..."
 TUIST_SKIP_UPDATE_CHECK=1 tuist generate --no-open
 
 echo "==> Building Release..."
-TUIST_SKIP_UPDATE_CHECK=1 tuist xcodebuild build \
+xcodebuild build \
+    -workspace "$APP_NAME.xcworkspace" \
     -scheme "$APP_NAME" \
     -configuration Release \
-    -derivedDataPath "$DERIVED"
+    -derivedDataPath "$DERIVED" \
+    -quiet
 
 APP_PATH=$(find "$DERIVED" -name "$APP_NAME.app" -type d | head -1)
 if [ -z "$APP_PATH" ]; then

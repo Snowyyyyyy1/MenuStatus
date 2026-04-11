@@ -66,34 +66,46 @@ struct StatusClient {
         }
     }
 
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.waitsForConnectivity = true
+        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForResource = 30
+        return URLSession(configuration: config)
+    }()
+
     private static func fetchData(from url: URL) async throws -> Data {
-        let (data, response) = try await URLSession.shared.data(from: url)
+        let (data, response) = try await session.data(from: url)
         try validateHTTPResponse(response, for: url)
         return data
     }
 
     static func parseIncidentIOHistoryHTML(_ data: Data) throws -> OfficialHistorySnapshot {
-        guard let html = String(data: data, encoding: .utf8) else {
-            throw IncidentIOParseError.invalidHTML
+        // Scope HTML and decoded blocks so they're released before JSON decoding
+        let summaryJSON: String
+        let dataJSON: String
+        let generatedAt: Date?
+        do {
+            guard let html = String(data: data, encoding: .utf8) else {
+                throw IncidentIOParseError.invalidHTML
+            }
+            let decodedBlocks = try extractDecodedNextBlocks(from: html)
+
+            guard let summaryBlock = decodedBlocks.first(where: { $0.contains(#""summary":{"#) }) else {
+                throw IncidentIOParseError.missingSummary
+            }
+            guard let dataBlock = decodedBlocks.first(where: { $0.contains(#""data":{"component_impacts""#) }) else {
+                throw IncidentIOParseError.missingHistoryData
+            }
+
+            summaryJSON = try sanitizeEmbeddedJSON(extractJSONObject(after: #""summary":"#, in: summaryBlock))
+            dataJSON = try sanitizeEmbeddedJSON(extractJSONObject(after: #""data":"#, in: dataBlock))
+            generatedAt = parseGeneratedAt(in: summaryBlock)
         }
-
-        let decodedBlocks = try extractDecodedNextBlocks(from: html)
-
-        guard let summaryBlock = decodedBlocks.first(where: { $0.contains(#""summary":{"#) }) else {
-            throw IncidentIOParseError.missingSummary
-        }
-
-        guard let dataBlock = decodedBlocks.first(where: { $0.contains(#""data":{"component_impacts""#) }) else {
-            throw IncidentIOParseError.missingHistoryData
-        }
-
-        let summaryJSON = try sanitizeEmbeddedJSON(extractJSONObject(after: #""summary":"#, in: summaryBlock))
-        let dataJSON = try sanitizeEmbeddedJSON(extractJSONObject(after: #""data":"#, in: dataBlock))
 
         let summary = try decoder.decode(OpenAIOfficialSummary.self, from: Data(summaryJSON.utf8))
         let historyData = try decoder.decode(OpenAIOfficialHistoryData.self, from: Data(dataJSON.utf8))
 
-        let generatedAt = parseGeneratedAt(in: summaryBlock)
         return makeOfficialHistorySnapshot(
             generatedAt: generatedAt,
             summary: summary,
@@ -102,20 +114,25 @@ struct StatusClient {
     }
 
     static func parseAtlassianStatuspageHistoryHTML(_ data: Data) throws -> OfficialHistorySnapshot {
-        guard let html = String(data: data, encoding: .utf8) else {
-            throw AtlassianStatuspageParseError.invalidHTML
+        let generatedAt: Date?
+        let componentBlocks: [OfficialHistoryComponent]
+        do {
+            guard let html = String(data: data, encoding: .utf8) else {
+                throw AtlassianStatuspageParseError.invalidHTML
+            }
+            generatedAt = parseStatuspageGeneratedAt(in: html)
+            componentBlocks = try extractStatuspageComponentBlocks(from: html)
         }
-
-        let generatedAt = parseStatuspageGeneratedAt(in: html)
-        let componentBlocks = try extractStatuspageComponentBlocks(from: html)
         let components = Dictionary(uniqueKeysWithValues: componentBlocks.map { ($0.id, $0) })
-
         return OfficialHistorySnapshot(generatedAt: generatedAt, groups: [], componentsByID: components, incidentNames: [:])
     }
 
     static func parseIncidentIOIncidentNames(_ data: Data) throws -> [String: String] {
-        guard let html = String(data: data, encoding: .utf8) else { return [:] }
-        let decodedBlocks = (try? extractDecodedNextBlocks(from: html)) ?? []
+        let decodedBlocks: [String]
+        do {
+            guard let html = String(data: data, encoding: .utf8) else { return [:] }
+            decodedBlocks = (try? extractDecodedNextBlocks(from: html)) ?? []
+        }
 
         let regex = /"id":"([^"]+)"[^}]*?"name":"([^"]+)"/.dotMatchesNewlines()
         var names: [String: String] = [:]
@@ -268,7 +285,7 @@ struct StatusClient {
 
     private static func decodeJSONStringLiteral(_ raw: String) throws -> String {
         let wrapped = "\"\(raw)\""
-        return try JSONDecoder().decode(String.self, from: Data(wrapped.utf8))
+        return try decoder.decode(String.self, from: Data(wrapped.utf8))
     }
 
     private static func extractJSONObject(after marker: String, in text: String) throws -> String {
@@ -325,19 +342,16 @@ struct StatusClient {
     }
 
     static func parseAtlassianHistoryPage(_ data: Data) -> [HistoryPageIncident] {
-        guard let html = String(data: data, encoding: .utf8) else { return [] }
-
-        // Extract data-react-props JSON
-        guard let propsMatch = html.firstMatch(of: /data-react-props="([^"]*)/) else {
-            return []
-        }
-
-        let escaped = String(propsMatch.1)
-        let unescaped = decodeHTML(escaped)
-        guard let propsData = unescaped.data(using: .utf8),
-              let props = try? JSONSerialization.jsonObject(with: propsData) as? [String: Any],
-              let months = props["months"] as? [[String: Any]] else {
-            return []
+        let months: [[String: Any]]
+        do {
+            guard let html = String(data: data, encoding: .utf8) else { return [] }
+            guard let propsMatch = html.firstMatch(of: /data-react-props="([^"]*)/) else { return [] }
+            let escaped = String(propsMatch.1)
+            let unescaped = decodeHTML(escaped)
+            guard let propsData = unescaped.data(using: .utf8),
+                  let props = try? JSONSerialization.jsonObject(with: propsData) as? [String: Any],
+                  let m = props["months"] as? [[String: Any]] else { return [] }
+            months = m
         }
 
         let calendar = Calendar(identifier: .gregorian)

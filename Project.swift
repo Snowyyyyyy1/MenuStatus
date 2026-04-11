@@ -15,6 +15,7 @@ let project = Project(
                 "SUPublicEDKey": .string(""),
             ]),
             sources: ["Sources/**"],
+            resources: ["Sources/Resources/**"],
             dependencies: [
                 .external(name: "Sparkle"),
                 .external(name: "MenuBarExtraAccess"),

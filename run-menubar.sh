@@ -23,5 +23,5 @@ if [ -z "$APP_PATH" ]; then
     echo "Error: MenuStatus.app not found in .build"
     exit 1
 fi
-open "$APP_PATH"
+"$APP_PATH/Contents/MacOS/MenuStatus" &
 echo "==> MenuStatus is running"

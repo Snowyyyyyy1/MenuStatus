@@ -14,6 +14,8 @@ struct StatusMenuContentView: View {
     @State private var tooltipState = TooltipState()
     @State private var tooltipHeight: CGFloat = 0
     @State private var initialMeasurementDone = false
+    @State private var headerHeight: CGFloat = 0
+    @State private var footerHeight: CGFloat = 0
 
     private var enabledProviders: [ProviderConfig] {
         store.settings.providerConfigs.enabledProviders(settings: store.settings)
@@ -28,6 +30,9 @@ struct StatusMenuContentView: View {
 
     private var maxVisibleContentHeight: CGFloat {
         let screenHeight = NSScreen.main?.visibleFrame.height ?? 900
+        if headerHeight > 0, footerHeight > 0 {
+            return max(200, screenHeight - headerHeight - footerHeight - 20)
+        }
         return max(200, screenHeight - MenuContentSizing.minScreenMargin)
     }
 
@@ -43,19 +48,27 @@ struct StatusMenuContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Tab bar (3-column grid)
-            ProviderTabGrid(
-                providers: enabledProviders,
-                activeProvider: activeProvider,
-                summaries: store.summaries,
-                settings: store.settings
-            ) { provider in
-                selectedProvider = provider
-            }
-            .padding(.horizontal, 10)
-            .padding(.top, 10)
-            .padding(.bottom, 6)
+            VStack(spacing: 0) {
+                ProviderTabGrid(
+                    providers: enabledProviders,
+                    activeProvider: activeProvider,
+                    summaries: store.summaries,
+                    settings: store.settings
+                ) { provider in
+                    selectedProvider = provider
+                }
+                .padding(.horizontal, 10)
+                .padding(.top, 10)
+                .padding(.bottom, 6)
 
-            Divider()
+                Divider()
+            }
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .onChange(of: proxy.size.height, initial: true) { _, h in headerHeight = h }
+                }
+            }
 
             // Selected provider content
             if needsScroll {
@@ -67,64 +80,77 @@ struct StatusMenuContentView: View {
                 measuredContent
             }
 
-            Divider()
+            VStack(spacing: 0) {
+                Divider()
 
-            // Error message
-            if let error = store.errorMessage {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 4)
-            }
-
-            // Footer
-            HStack {
-                if let date = store.lastRefreshed {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
-                        let seconds = Int(context.date.timeIntervalSince(date))
-                        Text("Updated \(seconds < 60 ? "\(seconds) sec" : "\(seconds / 60) min") ago")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                // Error message
+                if let error = store.errorMessage {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(3)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 4)
                 }
-                Spacer()
 
-                HStack(spacing: 12) {
-                    if store.isLoading {
-                        ProgressView()
-                            .controlSize(.mini)
-                    } else {
-                        Button {
-                            Task { await store.refreshNow() }
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
+                // Footer
+                HStack {
+                    if !store.isConnected {
+                        Label("Offline", systemImage: "wifi.slash")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if let date = store.lastRefreshed {
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            let seconds = Int(context.date.timeIntervalSince(date))
+                            Text("Updated \(seconds < 60 ? "\(seconds) sec" : "\(seconds / 60) min") ago")
                         }
-                        .help("Refresh")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+
+                    HStack(spacing: 12) {
+                        if store.isLoading {
+                            ProgressView()
+                                .controlSize(.mini)
+                        } else {
+                            Button {
+                                Task { await store.refreshNow() }
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            .help("Refresh")
+                            .modifier(FooterIconHover())
+                        }
+
+                        Button {
+                            openWindow(id: "settings")
+                            NSApp.activate(ignoringOtherApps: true)
+                        } label: {
+                            Image(systemName: "gearshape")
+                        }
+                        .help("Settings")
+                        .modifier(FooterIconHover())
+
+                        Button {
+                            NSApplication.shared.terminate(nil)
+                        } label: {
+                            Image(systemName: "power")
+                        }
+                        .help("Quit")
                         .modifier(FooterIconHover())
                     }
-
-                    Button {
-                        openWindow(id: "settings")
-                        NSApp.activate(ignoringOtherApps: true)
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .help("Settings")
-                    .modifier(FooterIconHover())
-
-                    Button {
-                        NSApplication.shared.terminate(nil)
-                    } label: {
-                        Image(systemName: "power")
-                    }
-                    .help("Quit")
-                    .modifier(FooterIconHover())
+                    .buttonStyle(.plain)
+                    .font(.system(size: 13))
                 }
-                .buttonStyle(.plain)
-                .font(.system(size: 13))
+                .padding(10)
             }
-            .padding(10)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .onChange(of: proxy.size.height, initial: true) { _, h in footerHeight = h }
+                }
+            }
         }
         .frame(width: MenuContentSizing.width)
         .opacity(initialMeasurementDone ? 1 : 0)
@@ -141,8 +167,7 @@ struct StatusMenuContentView: View {
                     .background {
                         GeometryReader { proxy in
                             Color.clear
-                                .onAppear { tooltipHeight = proxy.size.height }
-                                .onChange(of: proxy.size.height) { _, h in tooltipHeight = h }
+                                .onChange(of: proxy.size.height, initial: true) { _, h in tooltipHeight = h }
                         }
                     }
                     .offset(
@@ -165,19 +190,13 @@ struct StatusMenuContentView: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .background {
                 GeometryReader { proxy in
-                    Color.clear.onAppear {
-                        if let provider = activeProvider {
-                            contentHeights[provider] = proxy.size.height
-                            if !initialMeasurementDone {
-                                initialMeasurementDone = true
+                    Color.clear
+                        .onChange(of: proxy.size.height, initial: true) { _, h in
+                            if let provider = activeProvider {
+                                contentHeights[provider] = h
+                                if !initialMeasurementDone { initialMeasurementDone = true }
                             }
                         }
-                    }
-                    .onChange(of: proxy.size.height) { _, newHeight in
-                        if let provider = activeProvider {
-                            contentHeights[provider] = newHeight
-                        }
-                    }
                 }
             }
     }

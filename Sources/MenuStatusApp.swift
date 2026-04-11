@@ -42,8 +42,19 @@ private struct MenuBarIcon: View {
     let indicator: StatusIndicator
     let style: MenuBarIconStyle
 
+    private nonisolated(unsafe) static var cache: (indicator: StatusIndicator, style: MenuBarIconStyle, image: NSImage)?
+
     var body: some View {
-        Image(nsImage: buildImage())
+        Image(nsImage: cachedImage())
+    }
+
+    private func cachedImage() -> NSImage {
+        if let c = Self.cache, c.indicator == indicator, c.style == style {
+            return c.image
+        }
+        let image = buildImage()
+        Self.cache = (indicator, style, image)
+        return image
     }
 
     private func buildImage() -> NSImage {

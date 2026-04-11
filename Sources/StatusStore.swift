@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import Observation
 
 @MainActor
@@ -11,9 +12,12 @@ final class StatusStore {
     var lastRefreshed: Date?
     var isLoading = false
     var errorMessage: String?
+    private(set) var isConnected = true
 
     private var pollingTask: Task<Void, Never>?
     private var groupExpansionOverrides: [String: Bool] = [:]
+    private var pathMonitor: NWPathMonitor?
+    private var debounceTask: Task<Void, Never>?
     let settings: SettingsStore
 
     init(settings: SettingsStore) {
@@ -25,15 +29,21 @@ final class StatusStore {
         return indicators.max() ?? .none
     }
 
+    // MARK: - Polling
+
     func startPolling() {
         stopPolling()
+        startNetworkMonitor()
         pollingTask = Task {
             while !Task.isCancelled {
-                await refreshNow()
+                if isConnected {
+                    await refreshNow()
+                }
                 do {
                     try await Task.sleep(for: .seconds(settings.refreshInterval))
                 } catch {
-                    break
+                    if Task.isCancelled { break }
+                    // Sleep interrupted by network change — loop continues
                 }
             }
         }
@@ -42,6 +52,57 @@ final class StatusStore {
     func stopPolling() {
         pollingTask?.cancel()
         pollingTask = nil
+        stopNetworkMonitor()
+    }
+
+    // MARK: - Network Monitor
+
+    private func startNetworkMonitor() {
+        let monitor = NWPathMonitor()
+        pathMonitor = monitor
+        monitor.pathUpdateHandler = { [weak self] path in
+            let connected = path.status == .satisfied
+            Task { @MainActor [weak self] in
+                self?.handlePathChange(connected)
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "com.snowyy.MenuStatus.network"))
+    }
+
+    private func stopNetworkMonitor() {
+        pathMonitor?.cancel()
+        pathMonitor = nil
+        debounceTask?.cancel()
+        debounceTask = nil
+    }
+
+    private func handlePathChange(_ connected: Bool) {
+        debounceTask?.cancel()
+        debounceTask = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            let wasDisconnected = !isConnected
+            isConnected = connected
+            if connected {
+                if wasDisconnected {
+                    errorMessage = nil
+                    // Cancel the polling sleep to refresh immediately
+                    pollingTask?.cancel()
+                    pollingTask = Task {
+                        while !Task.isCancelled {
+                            await refreshNow()
+                            do {
+                                try await Task.sleep(for: .seconds(settings.refreshInterval))
+                            } catch {
+                                if Task.isCancelled { break }
+                            }
+                        }
+                    }
+                }
+            } else {
+                errorMessage = nil
+            }
+        }
     }
 
     func timeline(for provider: ProviderConfig, componentId: String) -> ComponentTimeline? {
@@ -64,6 +125,7 @@ final class StatusStore {
     }
 
     func refreshNow() async {
+        guard !isLoading else { return }
         isLoading = true
         errorMessage = nil
 
