@@ -131,7 +131,6 @@ final class StatusStore {
 
         let activeProviders = settings.providerConfigs
             .enabledProviders(settings: settings)
-            .filter { $0.hasStatusPage }
         let activeSet = Set(activeProviders)
         let existingSummaries = summaries.filter { activeSet.contains($0.key) }
 

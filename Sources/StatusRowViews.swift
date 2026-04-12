@@ -11,9 +11,7 @@ struct ProviderSectionView: View {
     let provider: ProviderConfig
     let summary: StatuspageSummary?
     let store: StatusStore
-    let benchmarkStore: AIStupidLevelStore
     let settings: SettingsStore
-    let onNavigateToBenchmark: () -> Void
 
     private var visibleComponents: [Component] {
         (summary?.components ?? []).filter { $0.group != true }
@@ -27,28 +25,10 @@ struct ProviderSectionView: View {
         store.sections(for: provider)
     }
 
-    private var benchmarkSummary: BenchmarkVendorSummary? {
-        guard let vendor = provider.aiStupidLevelVendor else { return nil }
-        let s = benchmarkStore.summary(forVendor: vendor)
-        return s.isEmpty ? nil : s
-    }
-
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 0) {
             if let summary {
                 statusPageContent(summary: summary)
-            } else {
-                benchmarkOnlyHeader
-            }
-
-            if let benchmarkSummary {
-                if summary != nil {
-                    Divider().padding(.horizontal, 16).padding(.vertical, 4)
-                }
-                BenchmarkSection(
-                    summary: benchmarkSummary,
-                    onNavigateToBenchmark: onNavigateToBenchmark
-                )
             }
         }
         .padding(.vertical, 4)
@@ -107,17 +87,6 @@ struct ProviderSectionView: View {
                 }
             }
         }
-    }
-
-    private var benchmarkOnlyHeader: some View {
-        HStack {
-            Label("Benchmarks only", systemImage: "chart.bar.xaxis")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
     }
 }
 

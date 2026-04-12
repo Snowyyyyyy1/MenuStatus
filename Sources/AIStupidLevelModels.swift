@@ -96,30 +96,3 @@ struct GlobalIndexPoint: Decodable, Identifiable {
     let hoursAgo: Int
 }
 
-// MARK: - Presentation Types
-
-struct BenchmarkVendorSummary: Equatable {
-    let vendor: String
-    let scores: [BenchmarkScore]
-    let averageScore: Double
-    let warningCount: Int
-    let criticalCount: Int
-
-    static func build(from scores: [BenchmarkScore], vendor: String) -> BenchmarkVendorSummary {
-        let matching = scores
-            .filter { $0.provider.caseInsensitiveCompare(vendor) == .orderedSame }
-            .sorted { $0.currentScore > $1.currentScore }
-        let avg: Double = matching.isEmpty
-            ? 0
-            : matching.map(\.currentScore).reduce(0, +) / Double(matching.count)
-        return BenchmarkVendorSummary(
-            vendor: vendor,
-            scores: matching,
-            averageScore: avg,
-            warningCount: matching.filter { $0.status == .warning }.count,
-            criticalCount: matching.filter { $0.status == .critical }.count
-        )
-    }
-
-    var isEmpty: Bool { scores.isEmpty }
-}

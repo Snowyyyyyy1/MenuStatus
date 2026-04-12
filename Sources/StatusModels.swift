@@ -27,7 +27,6 @@ enum DateParsing {
 enum StatusPlatform: String, Codable {
     case atlassianStatuspage
     case incidentIO
-    case aiStupidLevelOnly
 }
 
 struct ProviderConfig: Codable, Identifiable, Hashable {
@@ -40,8 +39,6 @@ struct ProviderConfig: Codable, Identifiable, Hashable {
 
     var apiURL: URL { baseURL.appendingPathComponent("api/v2/summary.json") }
     var statusPageURL: URL { baseURL }
-
-    var hasStatusPage: Bool { platform != .aiStupidLevelOnly }
 
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
@@ -81,41 +78,8 @@ extension ProviderConfig {
         aiStupidLevelVendor: "anthropic"
     )
 
-    private static let benchmarkPlaceholder = URL(string: "https://aistupidlevel.info")!
-
-    static let xai = ProviderConfig(
-        id: "xai-benchmark", displayName: "xAI",
-        baseURL: benchmarkPlaceholder,
-        platform: .aiStupidLevelOnly, isBuiltIn: true,
-        aiStupidLevelVendor: "xai"
-    )
-    static let googleAI = ProviderConfig(
-        id: "google-benchmark", displayName: "Google AI",
-        baseURL: benchmarkPlaceholder,
-        platform: .aiStupidLevelOnly, isBuiltIn: true,
-        aiStupidLevelVendor: "google"
-    )
-    static let kimi = ProviderConfig(
-        id: "kimi-benchmark", displayName: "Kimi",
-        baseURL: benchmarkPlaceholder,
-        platform: .aiStupidLevelOnly, isBuiltIn: true,
-        aiStupidLevelVendor: "kimi"
-    )
-    static let glm = ProviderConfig(
-        id: "glm-benchmark", displayName: "GLM",
-        baseURL: benchmarkPlaceholder,
-        platform: .aiStupidLevelOnly, isBuiltIn: true,
-        aiStupidLevelVendor: "glm"
-    )
-    static let deepSeek = ProviderConfig(
-        id: "deepseek-benchmark", displayName: "DeepSeek",
-        baseURL: benchmarkPlaceholder,
-        platform: .aiStupidLevelOnly, isBuiltIn: true,
-        aiStupidLevelVendor: "deepseek"
-    )
-
     static let builtInProviders: [ProviderConfig] = [
-        .openAI, .anthropic, .xai, .googleAI, .kimi, .glm, .deepSeek,
+        .openAI, .anthropic,
     ]
 }
 

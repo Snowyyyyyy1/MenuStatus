@@ -52,18 +52,43 @@ struct StatusMenuContentView: View {
         return max(200, screenHeight - MenuContentSizing.minScreenMargin)
     }
 
-    private var activeContentHeight: CGFloat {
-        contentHeights[activeSelection] ?? .infinity
+    private var scrollFrameHeight: CGFloat {
+        guard let measured = contentHeights[activeSelection] else {
+            return maxVisibleContentHeight
+        }
+        return min(measured, maxVisibleContentHeight)
     }
 
-    private var needsScroll: Bool {
-        if case .benchmark = activeSelection { return true }
-        return activeContentHeight > maxVisibleContentHeight
+    private var activeErrorMessage: String? {
+        switch activeSelection {
+        case .benchmark:
+            benchmarkStore.errorMessage ?? store.errorMessage
+        case .provider:
+            store.errorMessage
+        }
+    }
+
+    private var activeLastRefreshed: Date? {
+        switch activeSelection {
+        case .benchmark:
+            benchmarkStore.lastRefreshed
+        case .provider:
+            store.lastRefreshed
+        }
+    }
+
+    private var activeIsLoading: Bool {
+        switch activeSelection {
+        case .benchmark:
+            benchmarkStore.isLoading || store.isLoading
+        case .provider:
+            store.isLoading
+        }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Tab bar (3-column grid) + Global Index bar
+            // Tab bar (3-column grid)
             VStack(spacing: 0) {
                 ProviderTabGrid(
                     providers: enabledProviders,
@@ -82,13 +107,6 @@ struct StatusMenuContentView: View {
                 .padding(.bottom, 6)
 
                 Divider()
-
-                if let globalIndex = benchmarkStore.globalIndex {
-                    GlobalIndexBar(index: globalIndex) {
-                        selection = .benchmark
-                    }
-                    Divider()
-                }
             }
             .background {
                 GeometryReader { proxy in
@@ -97,21 +115,17 @@ struct StatusMenuContentView: View {
                 }
             }
 
-            // Selected provider content
-            if needsScroll {
-                ScrollView {
-                    measuredContent
-                }
-                .frame(height: maxVisibleContentHeight)
-            } else {
+            ScrollView {
                 measuredContent
             }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(height: scrollFrameHeight)
 
             VStack(spacing: 0) {
                 Divider()
 
                 // Error message
-                if let error = store.errorMessage {
+                if let error = activeErrorMessage {
                     Text(error)
                         .font(.caption)
                         .foregroundStyle(.red)
@@ -126,7 +140,7 @@ struct StatusMenuContentView: View {
                         Label("Offline", systemImage: "wifi.slash")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                    } else if let date = store.lastRefreshed {
+                    } else if let date = activeLastRefreshed {
                         TimelineView(.periodic(from: .now, by: 1)) { context in
                             let seconds = Int(context.date.timeIntervalSince(date))
                             Text("Updated \(seconds < 60 ? "\(seconds) sec" : "\(seconds / 60) min") ago")
@@ -137,12 +151,12 @@ struct StatusMenuContentView: View {
                     Spacer()
 
                     HStack(spacing: 12) {
-                        if store.isLoading {
+                        if activeIsLoading {
                             ProgressView()
                                 .controlSize(.mini)
                         } else {
                             Button {
-                                Task { await store.refreshNow() }
+                                Task { await refreshVisibleContent() }
                             } label: {
                                 Image(systemName: "arrow.clockwise")
                             }
@@ -230,27 +244,24 @@ struct StatusMenuContentView: View {
     private var selectedProviderContent: some View {
         switch activeSelection {
         case .benchmark:
-            AIStupidLevelPageView(benchmarkStore: benchmarkStore) { provider in
-                selection = .provider(provider)
+            if benchmarkStore.hasVisibleContent {
+                AIStupidLevelPageView(benchmarkStore: benchmarkStore) { provider in
+                    selection = .provider(provider)
+                }
+            } else if benchmarkStore.isLoading {
+                loadingPlaceholder
+            } else {
+                emptyPlaceholder(
+                    message: benchmarkStore.errorMessage ?? "No benchmark data yet."
+                )
             }
         case .provider(let provider):
-            if provider.hasStatusPage, let summary = store.summaries[provider] {
+            if let summary = store.summaries[provider] {
                 ProviderSectionView(
                     provider: provider,
                     summary: summary,
                     store: store,
-                    benchmarkStore: benchmarkStore,
-                    settings: store.settings,
-                    onNavigateToBenchmark: { selection = .benchmark }
-                )
-            } else if !provider.hasStatusPage {
-                ProviderSectionView(
-                    provider: provider,
-                    summary: nil,
-                    store: store,
-                    benchmarkStore: benchmarkStore,
-                    settings: store.settings,
-                    onNavigateToBenchmark: { selection = .benchmark }
+                    settings: store.settings
                 )
             } else {
                 loadingPlaceholder
@@ -259,15 +270,36 @@ struct StatusMenuContentView: View {
     }
 
     private var loadingPlaceholder: some View {
+        placeholder(message: "Loading...", showsProgress: true)
+    }
+
+    private func emptyPlaceholder(message: String) -> some View {
+        placeholder(message: message, showsProgress: false)
+    }
+
+    private func placeholder(message: String, showsProgress: Bool) -> some View {
         VStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
-            Text("Loading...")
+            if showsProgress {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            Text(message)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 40)
+    }
+
+    private func refreshVisibleContent() async {
+        async let providerRefresh: Void = store.refreshNow()
+        switch activeSelection {
+        case .benchmark:
+            async let benchmarkRefresh: Void = benchmarkStore.refreshNow()
+            _ = await (providerRefresh, benchmarkRefresh)
+        case .provider:
+            _ = await providerRefresh
+        }
     }
 }
 
@@ -299,7 +331,9 @@ private struct ProviderTabGrid: View {
                                 onSelectProvider(provider)
                             }
                         } else {
-                            Color.clear.gridCellUnsizedAxes(.vertical)
+                            Color.clear
+                                .frame(maxWidth: .infinity)
+                                .gridCellUnsizedAxes(.vertical)
                         }
                     }
                 }
@@ -314,8 +348,12 @@ private struct ProviderTabGrid: View {
                     isSelected: activeSelection == .benchmark,
                     action: onSelectBenchmark
                 )
-                Color.clear.gridCellUnsizedAxes(.vertical)
-                Color.clear.gridCellUnsizedAxes(.vertical)
+                Color.clear
+                    .frame(maxWidth: .infinity)
+                    .gridCellUnsizedAxes(.vertical)
+                Color.clear
+                    .frame(maxWidth: .infinity)
+                    .gridCellUnsizedAxes(.vertical)
             }
         }
     }
