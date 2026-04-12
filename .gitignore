@@ -40,3 +40,6 @@ claude.md
 *.swp
 *.swo
 *.orig
+
+# Local planning docs
+docs/superpowers/
