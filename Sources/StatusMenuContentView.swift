@@ -6,12 +6,17 @@ private enum MenuContentSizing {
     static let minScreenMargin: CGFloat = 140
 }
 
+enum MenuSelection: Hashable {
+    case provider(ProviderConfig)
+    case benchmark
+}
+
 struct StatusMenuContentView: View {
     let store: StatusStore
     let benchmarkStore: AIStupidLevelStore
     @Environment(\.openWindow) private var openWindow
-    @State private var selectedProvider: ProviderConfig?
-    @State private var contentHeights: [ProviderConfig: CGFloat] = [:]
+    @State private var selection: MenuSelection?
+    @State private var contentHeights: [MenuSelection: CGFloat] = [:]
     @State private var tooltipState = TooltipState()
     @State private var tooltipHeight: CGFloat = 0
     @State private var initialMeasurementDone = false
@@ -22,11 +27,21 @@ struct StatusMenuContentView: View {
         store.settings.providerConfigs.enabledProviders(settings: store.settings)
     }
 
-    private var activeProvider: ProviderConfig? {
-        if let selectedProvider, enabledProviders.contains(selectedProvider) {
-            return selectedProvider
+    private var activeSelection: MenuSelection {
+        if let selection {
+            switch selection {
+            case .provider(let p) where enabledProviders.contains(p):
+                return selection
+            case .benchmark:
+                return selection
+            default:
+                break
+            }
         }
-        return enabledProviders.first
+        if let first = enabledProviders.first {
+            return .provider(first)
+        }
+        return .benchmark
     }
 
     private var maxVisibleContentHeight: CGFloat {
@@ -38,12 +53,12 @@ struct StatusMenuContentView: View {
     }
 
     private var activeContentHeight: CGFloat {
-        guard let provider = activeProvider else { return .infinity }
-        return contentHeights[provider] ?? .infinity
+        contentHeights[activeSelection] ?? .infinity
     }
 
     private var needsScroll: Bool {
-        activeContentHeight > maxVisibleContentHeight
+        if case .benchmark = activeSelection { return true }
+        return activeContentHeight > maxVisibleContentHeight
     }
 
     var body: some View {
@@ -52,12 +67,16 @@ struct StatusMenuContentView: View {
             VStack(spacing: 0) {
                 ProviderTabGrid(
                     providers: enabledProviders,
-                    activeProvider: activeProvider,
+                    activeSelection: activeSelection,
                     summaries: store.summaries,
-                    settings: store.settings
-                ) { provider in
-                    selectedProvider = provider
-                }
+                    settings: store.settings,
+                    onSelectProvider: { provider in
+                        selection = .provider(provider)
+                    },
+                    onSelectBenchmark: {
+                        selection = .benchmark
+                    }
+                )
                 .padding(.horizontal, 10)
                 .padding(.top, 10)
                 .padding(.bottom, 6)
@@ -65,7 +84,9 @@ struct StatusMenuContentView: View {
                 Divider()
 
                 if let globalIndex = benchmarkStore.globalIndex {
-                    GlobalIndexBar(index: globalIndex)
+                    GlobalIndexBar(index: globalIndex) {
+                        selection = .benchmark
+                    }
                     Divider()
                 }
             }
@@ -198,10 +219,8 @@ struct StatusMenuContentView: View {
                 GeometryReader { proxy in
                     Color.clear
                         .onChange(of: proxy.size.height, initial: true) { _, h in
-                            if let provider = activeProvider {
-                                contentHeights[provider] = h
-                                if !initialMeasurementDone { initialMeasurementDone = true }
-                            }
+                            contentHeights[activeSelection] = h
+                            if !initialMeasurementDone { initialMeasurementDone = true }
                         }
                 }
             }
@@ -209,14 +228,20 @@ struct StatusMenuContentView: View {
 
     @ViewBuilder
     private var selectedProviderContent: some View {
-        if let provider = activeProvider {
+        switch activeSelection {
+        case .benchmark:
+            AIStupidLevelPageView(benchmarkStore: benchmarkStore) { provider in
+                selection = .provider(provider)
+            }
+        case .provider(let provider):
             if provider.hasStatusPage, let summary = store.summaries[provider] {
                 ProviderSectionView(
                     provider: provider,
                     summary: summary,
                     store: store,
                     benchmarkStore: benchmarkStore,
-                    settings: store.settings
+                    settings: store.settings,
+                    onNavigateToBenchmark: { selection = .benchmark }
                 )
             } else if !provider.hasStatusPage {
                 ProviderSectionView(
@@ -224,13 +249,12 @@ struct StatusMenuContentView: View {
                     summary: nil,
                     store: store,
                     benchmarkStore: benchmarkStore,
-                    settings: store.settings
+                    settings: store.settings,
+                    onNavigateToBenchmark: { selection = .benchmark }
                 )
             } else {
                 loadingPlaceholder
             }
-        } else {
-            loadingPlaceholder
         }
     }
 
@@ -251,16 +275,17 @@ struct StatusMenuContentView: View {
 
 private struct ProviderTabGrid: View {
     let providers: [ProviderConfig]
-    let activeProvider: ProviderConfig?
+    let activeSelection: MenuSelection
     let summaries: [ProviderConfig: StatuspageSummary]
     let settings: SettingsStore
-    let onSelect: (ProviderConfig) -> Void
+    let onSelectProvider: (ProviderConfig) -> Void
+    let onSelectBenchmark: () -> Void
 
     private let columns = 3
 
     var body: some View {
         Grid(horizontalSpacing: 4, verticalSpacing: 4) {
-            ForEach(0..<rowCount, id: \.self) { rowIndex in
+            ForEach(0..<providerRowCount, id: \.self) { rowIndex in
                 GridRow {
                     ForEach(0..<columns, id: \.self) { col in
                         let index = rowIndex * columns + col
@@ -268,10 +293,10 @@ private struct ProviderTabGrid: View {
                             let provider = providers[index]
                             ProviderTab(
                                 name: settings.displayName(for: provider),
-                                isSelected: activeProvider == provider,
+                                isSelected: activeSelection == .provider(provider),
                                 indicator: summaries[provider]?.status.indicator
                             ) {
-                                onSelect(provider)
+                                onSelectProvider(provider)
                             }
                         } else {
                             Color.clear.gridCellUnsizedAxes(.vertical)
@@ -279,11 +304,57 @@ private struct ProviderTabGrid: View {
                     }
                 }
             }
+
+            Divider()
+                .gridCellColumns(columns)
+                .padding(.vertical, 2)
+
+            GridRow {
+                BenchmarkTab(
+                    isSelected: activeSelection == .benchmark,
+                    action: onSelectBenchmark
+                )
+                Color.clear.gridCellUnsizedAxes(.vertical)
+                Color.clear.gridCellUnsizedAxes(.vertical)
+            }
         }
     }
 
-    private var rowCount: Int {
+    private var providerRowCount: Int {
         (providers.count + columns - 1) / columns
+    }
+}
+
+// MARK: - Benchmark Tab
+
+private struct BenchmarkTab: View {
+    let isSelected: Bool
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: "chart.bar.xaxis")
+                    .font(.system(size: 10))
+                Text("Benchmark")
+                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(isSelected ? .primary : .secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isSelected ? Color.primary.opacity(0.1) : isHovered ? Color.primary.opacity(0.05) : .clear)
+                    .animation(.easeInOut(duration: 0.15), value: isSelected)
+                    .animation(.easeInOut(duration: 0.15), value: isHovered)
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
     }
 }
 

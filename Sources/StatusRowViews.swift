@@ -13,6 +13,7 @@ struct ProviderSectionView: View {
     let store: StatusStore
     let benchmarkStore: AIStupidLevelStore
     let settings: SettingsStore
+    let onNavigateToBenchmark: () -> Void
 
     private var visibleComponents: [Component] {
         (summary?.components ?? []).filter { $0.group != true }
@@ -32,18 +33,6 @@ struct ProviderSectionView: View {
         return s.isEmpty ? nil : s
     }
 
-    private var benchmarkExpanded: Bool {
-        settings.benchmarkSectionExpanded.contains(provider.id)
-    }
-
-    private func toggleBenchmarkExpanded() {
-        if settings.benchmarkSectionExpanded.contains(provider.id) {
-            settings.benchmarkSectionExpanded.remove(provider.id)
-        } else {
-            settings.benchmarkSectionExpanded.insert(provider.id)
-        }
-    }
-
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 0) {
             if let summary {
@@ -58,8 +47,7 @@ struct ProviderSectionView: View {
                 }
                 BenchmarkSection(
                     summary: benchmarkSummary,
-                    isExpanded: benchmarkExpanded,
-                    onToggle: toggleBenchmarkExpanded
+                    onNavigateToBenchmark: onNavigateToBenchmark
                 )
             }
         }
