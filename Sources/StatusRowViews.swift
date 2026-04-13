@@ -31,6 +31,7 @@ struct ProviderSectionView: View {
                 statusPageContent(summary: summary)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
     }
 

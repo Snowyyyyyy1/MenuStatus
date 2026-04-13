@@ -6,6 +6,18 @@ private enum MenuContentSizing {
     static let minScreenMargin: CGFloat = 140
 }
 
+enum MenuLayoutMetrics {
+    static func tooltipOffsetX(
+        dayX: CGFloat,
+        menuWidth: CGFloat,
+        tooltipWidth: CGFloat = 220,
+        padding: CGFloat = 8
+    ) -> CGFloat {
+        let maxOffset = max(padding, menuWidth - tooltipWidth - padding)
+        return min(max(padding, dayX - tooltipWidth / 2), maxOffset)
+    }
+}
+
 enum MenuSelection: Hashable {
     case provider(ProviderConfig)
     case benchmark
@@ -22,6 +34,7 @@ struct StatusMenuContentView: View {
     @State private var initialMeasurementDone = false
     @State private var headerHeight: CGFloat = 0
     @State private var footerHeight: CGFloat = 0
+    @State private var measuredMenuWidth: CGFloat = MenuContentSizing.width
 
     private var enabledProviders: [ProviderConfig] {
         store.settings.providerConfigs.enabledProviders(settings: store.settings)
@@ -193,10 +206,18 @@ struct StatusMenuContentView: View {
                 }
             }
         }
-        .frame(width: MenuContentSizing.width)
+        .frame(width: MenuContentSizing.width, alignment: .topLeading)
         .opacity(initialMeasurementDone ? 1 : 0)
         .coordinateSpace(name: "menu")
         .environment(tooltipState)
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onChange(of: proxy.size.width, initial: true) { _, width in
+                        measuredMenuWidth = width
+                    }
+            }
+        }
         .overlay(alignment: .topLeading) {
             if let info = tooltipState.info, info.details.contains(where: { $0.level != .operational && $0.level != .noData }) {
                 let pad: CGFloat = 8
@@ -212,7 +233,10 @@ struct StatusMenuContentView: View {
                         }
                     }
                     .offset(
-                        x: tooltipOffsetX(dayX: info.dayX),
+                        x: MenuLayoutMetrics.tooltipOffsetX(
+                            dayX: info.dayX,
+                            menuWidth: measuredMenuWidth
+                        ),
                         y: max(0, y)
                     )
                     .allowsHitTesting(false)
@@ -220,15 +244,9 @@ struct StatusMenuContentView: View {
         }
     }
 
-    private func tooltipOffsetX(dayX: CGFloat) -> CGFloat {
-        let half: CGFloat = 110
-        let pad: CGFloat = 8
-        return min(max(pad, dayX - half), MenuContentSizing.width - half * 2 - pad)
-    }
-
     private var measuredContent: some View {
         selectedProviderContent
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(width: measuredMenuWidth, alignment: .topLeading)
             .background {
                 GeometryReader { proxy in
                     Color.clear
@@ -356,6 +374,7 @@ private struct ProviderTabGrid: View {
                     .gridCellUnsizedAxes(.vertical)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var providerRowCount: Int {

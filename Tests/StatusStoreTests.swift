@@ -2,6 +2,19 @@ import XCTest
 @testable import MenuStatus
 
 final class StatusStoreTests: XCTestCase {
+    func testTooltipOffsetUsesMeasuredMenuWidth() {
+        XCTAssertEqual(
+            MenuLayoutMetrics.tooltipOffsetX(dayX: 260, menuWidth: 300),
+            72,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(
+            MenuLayoutMetrics.tooltipOffsetX(dayX: 20, menuWidth: 300),
+            8,
+            accuracy: 0.001
+        )
+    }
+
     @MainActor
     func testUnhealthyGroupsAutoExpandUntilUserOverridesThem() {
         let settings = SettingsStore()
