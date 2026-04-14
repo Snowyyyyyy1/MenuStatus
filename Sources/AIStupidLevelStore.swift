@@ -97,7 +97,6 @@ final class AIStupidLevelStore {
     private let now: () -> Date
     private var pollingTask: Task<Void, Never>?
     private var hoverFetchTasks: [String: Task<HoverFetchPayload, Never>] = [:]
-    private var resolvedHoverPayloadModelIDs: Set<String> = []
     private(set) var pollInterval: TimeInterval = 300
 
     init(
@@ -123,10 +122,9 @@ final class AIStupidLevelStore {
     }
 
     func hasResolvedHoverPayload(for modelId: String) -> Bool {
-        resolvedHoverPayloadModelIDs.contains(modelId)
-            || (modelDetailsByID[modelId] != nil
-                && modelStatsByModelID[modelId] != nil
-                && historyByModelID[modelId] != nil)
+        modelDetailsByID[modelId] != nil
+            && modelStatsByModelID[modelId] != nil
+            && historyByModelID[modelId] != nil
     }
 
     func startPolling(interval: TimeInterval) {
@@ -222,7 +220,6 @@ final class AIStupidLevelStore {
         if let history = payload.history {
             historyByModelID[modelId] = history
         }
-        resolvedHoverPayloadModelIDs.insert(modelId)
         persistHoverCacheEntryIfAvailable(for: modelId)
     }
 
@@ -329,7 +326,6 @@ final class AIStupidLevelStore {
             modelDetailsByID[modelId] = entry.detail
             modelStatsByModelID[modelId] = entry.stats
             historyByModelID[modelId] = entry.history
-            resolvedHoverPayloadModelIDs.insert(modelId)
         }
     }
 

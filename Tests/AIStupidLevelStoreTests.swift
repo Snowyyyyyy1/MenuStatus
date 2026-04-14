@@ -50,6 +50,22 @@ final class AIStupidLevelStoreTests: XCTestCase {
         }
     }
 
+    actor FailureFlag {
+        private var value: Bool
+
+        init(_ value: Bool) {
+            self.value = value
+        }
+
+        func get() -> Bool {
+            value
+        }
+
+        func set(_ newValue: Bool) {
+            value = newValue
+        }
+    }
+
     @MainActor
     func testHasVisibleContentReflectsLoadedBenchmarkSections() {
         let store = makeIsolatedStore(testName: #function)
@@ -104,7 +120,7 @@ final class AIStupidLevelStoreTests: XCTestCase {
         )
 
         await partialStore.loadHoverDataIfNeeded(modelId: "38", fetcher: fetcher)
-        XCTAssertTrue(partialStore.hasResolvedHoverPayload(for: "38"))
+        XCTAssertFalse(partialStore.hasResolvedHoverPayload(for: "38"))
     }
 
     @MainActor
@@ -273,7 +289,58 @@ final class AIStupidLevelStoreTests: XCTestCase {
         XCTAssertEqual(store.modelDetailsByID["38"]?.id, 38)
         XCTAssertNil(store.modelStatsByModelID["38"])
         XCTAssertEqual(store.historyByModelID["38"]?.history.count, 1)
+        XCTAssertFalse(store.hasResolvedHoverPayload(for: "38"))
+    }
+
+    @MainActor
+    func testLoadHoverDataIfNeededRetriesOnlyMissingPayloadsAfterPartialFailure() async {
+        let store = makeIsolatedStore(testName: #function)
+        let counter = ModelCallCounter()
+        let statsShouldFail = FailureFlag(true)
+
+        let fetcher = AIStupidLevelStore.Fetcher(
+            fetchScores: { [] },
+            fetchGlobalIndex: { self.makeGlobalIndex(score: 0) },
+            fetchDashboardAlerts: { [] },
+            fetchBatchStatus: { DashboardBatchStatusData(isBatchInProgress: nil, schedulerRunning: nil, nextScheduledRun: nil) },
+            fetchRecommendations: { AnalyticsRecommendationsPayload(bestForCode: nil, mostReliable: nil, fastestResponse: nil, avoidNow: []) },
+            fetchDegradations: { [] },
+            fetchProviderReliability: { [] },
+            fetchModelDetail: { modelId in
+                await counter.recordDetail(for: modelId)
+                return self.makeModelDetail(id: Int(modelId) ?? 0)
+            },
+            fetchModelStats: { modelId in
+                await counter.recordStats(for: modelId)
+                if await statsShouldFail.get() {
+                    throw StubError.failed
+                }
+                return self.makeModelStats(modelId: Int(modelId) ?? 0)
+            },
+            fetchModelHistory: { modelId in
+                await counter.recordHistory(for: modelId)
+                return self.makeModelHistory(modelId: Int(modelId) ?? 0)
+            }
+        )
+
+        await store.loadHoverDataIfNeeded(modelId: "38", fetcher: fetcher)
+        XCTAssertFalse(store.hasResolvedHoverPayload(for: "38"))
+        XCTAssertNil(store.modelStatsByModelID["38"])
+
+        await statsShouldFail.set(false)
+        await store.loadHoverDataIfNeeded(modelId: "38", fetcher: fetcher)
+
         XCTAssertTrue(store.hasResolvedHoverPayload(for: "38"))
+        XCTAssertEqual(store.modelDetailsByID["38"]?.id, 38)
+        XCTAssertEqual(store.modelStatsByModelID["38"]?.modelId, 38)
+        XCTAssertEqual(store.historyByModelID["38"]?.modelId, 38)
+
+        let detailCalls = await counter.detailCount(for: "38")
+        let statsCalls = await counter.statsCount(for: "38")
+        let historyCalls = await counter.historyCount(for: "38")
+        XCTAssertEqual(detailCalls, 1)
+        XCTAssertEqual(statsCalls, 2)
+        XCTAssertEqual(historyCalls, 1)
     }
 
     @MainActor
