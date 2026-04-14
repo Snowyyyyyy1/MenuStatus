@@ -18,6 +18,32 @@ enum MenuLayoutMetrics {
     }
 }
 
+struct MenuErrorMessages: Equatable {
+    let inline: String?
+    let footer: String?
+}
+
+enum MenuErrorPresentation {
+    static func messages(
+        for selection: MenuSelection,
+        statusError: String?,
+        benchmarkError: String?
+    ) -> MenuErrorMessages {
+        switch selection {
+        case .benchmark:
+            return MenuErrorMessages(
+                inline: benchmarkError ?? statusError,
+                footer: nil
+            )
+        case .provider:
+            return MenuErrorMessages(
+                inline: nil,
+                footer: statusError
+            )
+        }
+    }
+}
+
 enum MenuSelection: Hashable {
     case provider(ProviderConfig)
     case benchmark
@@ -31,6 +57,10 @@ struct StatusMenuContentView: View {
     @State private var contentHeights: [MenuSelection: CGFloat] = [:]
     @State private var tooltipState = TooltipState()
     @State private var tooltipHeight: CGFloat = 0
+    @State private var benchmarkHoverInfo: BenchmarkRowHoverInfo?
+    @State private var pendingBenchmarkHoverInfo: BenchmarkRowHoverInfo?
+    @State private var benchmarkHoverHeight: CGFloat = 0
+    @State private var benchmarkHoverTask: Task<Void, Never>?
     @State private var initialMeasurementDone = false
     @State private var headerHeight: CGFloat = 0
     @State private var footerHeight: CGFloat = 0
@@ -72,13 +102,12 @@ struct StatusMenuContentView: View {
         return min(measured, maxVisibleContentHeight)
     }
 
-    private var activeErrorMessage: String? {
-        switch activeSelection {
-        case .benchmark:
-            benchmarkStore.errorMessage ?? store.errorMessage
-        case .provider:
-            store.errorMessage
-        }
+    private var activeErrorMessages: MenuErrorMessages {
+        MenuErrorPresentation.messages(
+            for: activeSelection,
+            statusError: store.errorMessage,
+            benchmarkError: benchmarkStore.errorMessage
+        )
     }
 
     private var activeLastRefreshed: Date? {
@@ -97,6 +126,11 @@ struct StatusMenuContentView: View {
         case .provider:
             store.isLoading
         }
+    }
+
+    private var activeBenchmarkHoverScore: BenchmarkScore? {
+        guard let hover = benchmarkHoverInfo else { return nil }
+        return benchmarkStore.scores.first(where: { $0.id == hover.score.id }) ?? hover.score
     }
 
     var body: some View {
@@ -138,7 +172,7 @@ struct StatusMenuContentView: View {
                 Divider()
 
                 // Error message
-                if let error = activeErrorMessage {
+                if let error = activeErrorMessages.footer {
                     Text(error)
                         .font(.caption)
                         .foregroundStyle(.red)
@@ -210,6 +244,14 @@ struct StatusMenuContentView: View {
         .opacity(initialMeasurementDone ? 1 : 0)
         .coordinateSpace(name: "menu")
         .environment(tooltipState)
+        .onChange(of: activeSelection) { _, newSelection in
+            if case .benchmark = newSelection {
+                return
+            }
+            benchmarkHoverTask?.cancel()
+            pendingBenchmarkHoverInfo = nil
+            benchmarkHoverInfo = nil
+        }
         .background {
             GeometryReader { proxy in
                 Color.clear
@@ -219,7 +261,36 @@ struct StatusMenuContentView: View {
             }
         }
         .overlay(alignment: .topLeading) {
-            if let info = tooltipState.info, info.details.contains(where: { $0.level != .operational && $0.level != .noData }) {
+            if case .benchmark = activeSelection,
+               let hover = benchmarkHoverInfo,
+               let score = activeBenchmarkHoverScore {
+                let pad: CGFloat = 8
+                let showBelow = hover.rowMinY < (benchmarkHoverHeight + pad * 2)
+                let y = showBelow ? hover.rowMaxY + pad : hover.rowMinY - benchmarkHoverHeight - pad
+
+                BenchmarkModelHoverCard(
+                    score: score,
+                    detail: benchmarkStore.modelDetailsByID[score.id],
+                    stats: benchmarkStore.modelStatsByModelID[score.id],
+                    history: benchmarkStore.historyByModelID[score.id]
+                )
+                .fixedSize(horizontal: false, vertical: true)
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear
+                            .onChange(of: proxy.size.height, initial: true) { _, h in benchmarkHoverHeight = h }
+                    }
+                }
+                .offset(
+                    x: MenuLayoutMetrics.tooltipOffsetX(
+                        dayX: hover.anchorX,
+                        menuWidth: measuredMenuWidth,
+                        tooltipWidth: HoverSurfaceStyle.renderedWidth(forContentWidth: BenchmarkHoverStyle.tooltipWidth)
+                    ),
+                    y: max(0, y)
+                )
+                .allowsHitTesting(false)
+            } else if let info = tooltipState.info, info.details.contains(where: { $0.level != .operational && $0.level != .noData }) {
                 let pad: CGFloat = 8
                 let showBelow = info.barMinY < (tooltipHeight + pad * 2)
                 let y = showBelow ? info.barMaxY + pad : info.barMinY - tooltipHeight - pad
@@ -235,7 +306,8 @@ struct StatusMenuContentView: View {
                     .offset(
                         x: MenuLayoutMetrics.tooltipOffsetX(
                             dayX: info.dayX,
-                            menuWidth: measuredMenuWidth
+                            menuWidth: measuredMenuWidth,
+                            tooltipWidth: HoverSurfaceStyle.renderedWidth(forContentWidth: UptimeBarStyle.tooltipWidth)
                         ),
                         y: max(0, y)
                     )
@@ -245,7 +317,13 @@ struct StatusMenuContentView: View {
     }
 
     private var measuredContent: some View {
-        selectedProviderContent
+        VStack(alignment: .leading, spacing: 0) {
+            if let error = activeErrorMessages.inline {
+                InlineMenuErrorBanner(message: error)
+            }
+
+            selectedProviderContent
+        }
             .frame(width: measuredMenuWidth, alignment: .topLeading)
             .background {
                 GeometryReader { proxy in
@@ -263,14 +341,53 @@ struct StatusMenuContentView: View {
         switch activeSelection {
         case .benchmark:
             if benchmarkStore.hasVisibleContent {
-                AIStupidLevelPageView(benchmarkStore: benchmarkStore) { provider in
-                    selection = .provider(provider)
-                }
+                AIStupidLevelPageView(
+                    benchmarkStore: benchmarkStore,
+                    availableProviders: enabledProviders,
+                    onNavigateToProvider: { provider in
+                        benchmarkHoverTask?.cancel()
+                        pendingBenchmarkHoverInfo = nil
+                        benchmarkHoverInfo = nil
+                        selection = .provider(provider)
+                    },
+                    onHoverChange: { hoverInfo in
+                        benchmarkHoverTask?.cancel()
+                        pendingBenchmarkHoverInfo = hoverInfo
+
+                        guard let hoverInfo else {
+                            benchmarkHoverInfo = nil
+                            return
+                        }
+
+                        let modelId = hoverInfo.score.id
+                        if benchmarkStore.hasResolvedHoverPayload(for: modelId) {
+                            benchmarkHoverInfo = hoverInfo
+                            return
+                        }
+
+                        benchmarkHoverInfo = nil
+                        benchmarkHoverTask = Task {
+                            await benchmarkStore.loadHoverDataIfNeeded(modelId: modelId)
+                            guard !Task.isCancelled else { return }
+
+                            await MainActor.run {
+                                guard case .benchmark = activeSelection,
+                                      pendingBenchmarkHoverInfo?.score.id == modelId,
+                                      benchmarkStore.hasResolvedHoverPayload(for: modelId)
+                                else {
+                                    return
+                                }
+
+                                benchmarkHoverInfo = pendingBenchmarkHoverInfo
+                            }
+                        }
+                    }
+                )
             } else if benchmarkStore.isLoading {
                 loadingPlaceholder
             } else {
                 emptyPlaceholder(
-                    message: benchmarkStore.errorMessage ?? "No benchmark data yet."
+                    message: "No benchmark data yet."
                 )
             }
         case .provider(let provider):
@@ -318,6 +435,30 @@ struct StatusMenuContentView: View {
         case .provider:
             _ = await providerRefresh
         }
+    }
+}
+
+private struct InlineMenuErrorBanner: View {
+    let message: String
+
+    var body: some View {
+        Text(message)
+            .font(.caption)
+            .foregroundStyle(.red)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.red.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.red.opacity(0.18), lineWidth: 1)
+            )
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
     }
 }
 

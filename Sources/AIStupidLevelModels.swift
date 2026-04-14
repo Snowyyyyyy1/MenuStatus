@@ -5,12 +5,12 @@ import SwiftUI
 // MARK: - Raw API Types
 
 /// GET /api/dashboard/scores → { success, data: [BenchmarkScore] }
-struct BenchmarkScoresResponse: Decodable {
+struct BenchmarkScoresResponse: Codable {
     let success: Bool
     let data: [BenchmarkScore]
 }
 
-struct BenchmarkScore: Decodable, Identifiable, Hashable {
+struct BenchmarkScore: Codable, Identifiable, Hashable {
     let id: String
     let name: String
     let provider: String
@@ -29,7 +29,7 @@ struct BenchmarkScore: Decodable, Identifiable, Hashable {
     }
 }
 
-enum BenchmarkTrend: String, Decodable {
+enum BenchmarkTrend: String, Codable {
     case up, down, stable
 
     init(from decoder: Decoder) throws {
@@ -54,7 +54,7 @@ enum BenchmarkTrend: String, Decodable {
     }
 }
 
-enum BenchmarkStatus: String, Decodable {
+enum BenchmarkStatus: String, Codable {
     case good, warning, critical, unknown
 
     init(from decoder: Decoder) throws {
@@ -73,12 +73,12 @@ enum BenchmarkStatus: String, Decodable {
 }
 
 /// GET /api/dashboard/global-index → { success, data: { current, history, trend, ... } }
-struct GlobalIndexResponse: Decodable {
+struct GlobalIndexResponse: Codable {
     let success: Bool
     let data: GlobalIndex
 }
 
-struct GlobalIndex: Decodable {
+struct GlobalIndex: Codable {
     let current: GlobalIndexPoint
     let history: [GlobalIndexPoint]
     let trend: String
@@ -87,7 +87,7 @@ struct GlobalIndex: Decodable {
     let lastUpdated: String?
 }
 
-struct GlobalIndexPoint: Decodable, Identifiable {
+struct GlobalIndexPoint: Codable, Identifiable {
     var id: String { timestamp }
     let timestamp: String
     let label: String
@@ -95,4 +95,3 @@ struct GlobalIndexPoint: Decodable, Identifiable {
     let modelsCount: Int?
     let hoursAgo: Int
 }
-

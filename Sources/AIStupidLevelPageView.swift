@@ -2,7 +2,9 @@ import SwiftUI
 
 struct AIStupidLevelPageView: View {
     let benchmarkStore: AIStupidLevelStore
+    let availableProviders: [ProviderConfig]
     let onNavigateToProvider: (ProviderConfig) -> Void
+    let onHoverChange: (BenchmarkRowHoverInfo?) -> Void
 
     @State private var globalIndexExpanded = true
     @State private var rankingExpanded = true
@@ -31,9 +33,9 @@ struct AIStupidLevelPageView: View {
                     isExpanded: $rankingExpanded
                 ) {
                     ModelRankingView(
+                        benchmarkStore: benchmarkStore,
                         scores: benchmarkStore.scores,
-                        historyByModelID: benchmarkStore.historyByModelID,
-                        onLoadHistory: { benchmarkStore.loadHistoryIfNeeded(modelId: $0) }
+                        onHoverChange: onHoverChange
                     )
                 }
             }
@@ -44,6 +46,9 @@ struct AIStupidLevelPageView: View {
             degradationsSection
         }
         .padding(.bottom, 8)
+        .onDisappear {
+            onHoverChange(nil)
+        }
     }
 
     @ViewBuilder
@@ -109,9 +114,7 @@ struct AIStupidLevelPageView: View {
     }
 
     private func findProvider(forVendor vendorName: String) -> ProviderConfig? {
-        ProviderConfig.builtInProviders.first {
-            $0.aiStupidLevelVendor?.caseInsensitiveCompare(vendorName) == .orderedSame
-        }
+        ProviderConfig.provider(matchingBenchmarkVendor: vendorName, in: availableProviders)
     }
 }
 
@@ -294,15 +297,15 @@ private struct LargeIndexChart: View {
 // MARK: - Section 2: Model Ranking
 
 private struct ModelRankingView: View {
+    let benchmarkStore: AIStupidLevelStore
     let scores: [BenchmarkScore]
-    let historyByModelID: [String: ModelHistoryPayload]
-    let onLoadHistory: (String) -> Void
+    let onHoverChange: (BenchmarkRowHoverInfo?) -> Void
+    @Environment(\.openURL) private var openURL
 
     @State private var vendorFilter: String?
-    @State private var expandedModelID: String?
 
-    private var uniqueVendors: [String] {
-        Array(Set(scores.map(\.provider))).sorted()
+    private var orderedVendors: [String] {
+        BenchmarkVendorPresentation.orderedVendorIDs(from: scores.map(\.provider))
     }
 
     private var filteredScores: [BenchmarkScore] {
@@ -311,141 +314,216 @@ private struct ModelRankingView: View {
         return sorted.filter { $0.provider.caseInsensitiveCompare(filter) == .orderedSame }
     }
 
+    private var prefetchedModelIDs: [String] {
+        Array(filteredScores.prefix(6).map(\.id))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 4) {
-                FilterTag(label: "All", isSelected: vendorFilter == nil) {
-                    vendorFilter = nil
+            BenchmarkVendorTabGrid(
+                vendors: orderedVendors,
+                selectedVendor: vendorFilter,
+                onSelectAll: { vendorFilter = nil },
+                onSelectVendor: { vendor in
+                    vendorFilter = vendorFilter == vendor ? nil : vendor
                 }
-                ForEach(uniqueVendors, id: \.self) { vendor in
-                    FilterTag(label: vendor.capitalized, isSelected: vendorFilter == vendor) {
-                        vendorFilter = vendorFilter == vendor ? nil : vendor
-                    }
-                }
-            }
+            )
 
             ForEach(Array(filteredScores.enumerated()), id: \.element.id) { rank, score in
                 RankedModelRow(
                     rank: rank + 1,
                     score: score,
-                    isExpanded: expandedModelID == score.id,
-                    history: historyByModelID[score.id]
-                ) {
-                    if expandedModelID == score.id {
-                        expandedModelID = nil
-                    } else {
-                        expandedModelID = score.id
-                        onLoadHistory(score.id)
+                    onHoverChange: onHoverChange,
+                    onSelect: { openModelDetail(for: score) }
+                )
+            }
+        }
+        .task(id: prefetchedModelIDs) {
+            guard !prefetchedModelIDs.isEmpty else { return }
+            await benchmarkStore.prefetchHoverDataIfNeeded(modelIDs: prefetchedModelIDs)
+        }
+    }
+
+    private func openModelDetail(for score: BenchmarkScore) {
+        guard let url = AIStupidLevelClient.modelDetailPageURL(modelId: score.id) else { return }
+        openURL(url)
+    }
+}
+
+private struct BenchmarkVendorTabGrid: View {
+    let vendors: [String]
+    let selectedVendor: String?
+    let onSelectAll: () -> Void
+    let onSelectVendor: (String) -> Void
+
+    private let columns = 3
+
+    var body: some View {
+        Grid(horizontalSpacing: 4, verticalSpacing: 4) {
+            ForEach(0..<rowCount, id: \.self) { rowIndex in
+                GridRow {
+                    ForEach(0..<columns, id: \.self) { columnIndex in
+                        let index = rowIndex * columns + columnIndex
+                        if index == 0 {
+                            BenchmarkVendorTab(
+                                label: "All",
+                                isSelected: selectedVendor == nil,
+                                action: onSelectAll
+                            )
+                        } else {
+                            let vendorIndex = index - 1
+                            if vendorIndex < vendors.count {
+                                let vendor = vendors[vendorIndex]
+                                BenchmarkVendorTab(
+                                    label: BenchmarkVendorPresentation.displayName(for: vendor),
+                                    isSelected: selectedVendor?.caseInsensitiveCompare(vendor) == .orderedSame,
+                                    action: { onSelectVendor(vendor) }
+                                )
+                            } else {
+                                Color.clear
+                                    .frame(maxWidth: .infinity)
+                                    .gridCellUnsizedAxes(.vertical)
+                            }
+                        }
                     }
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var rowCount: Int {
+        let itemCount = vendors.count + 1
+        return (itemCount + columns - 1) / columns
     }
 }
 
-private struct FilterTag: View {
+private struct BenchmarkVendorTab: View {
     let label: String
     let isSelected: Bool
     let action: () -> Void
 
+    @State private var isHovered = false
+
     var body: some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
+                .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                 .foregroundStyle(isSelected ? .primary : .secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 6)
                 .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.05))
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(isSelected ? Color.primary.opacity(0.1) : isHovered ? Color.primary.opacity(0.05) : .clear)
+                        .animation(.easeInOut(duration: 0.15), value: isSelected)
+                        .animation(.easeInOut(duration: 0.15), value: isHovered)
                 )
         }
         .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
     }
 }
 
 private struct RankedModelRow: View {
     let rank: Int
     let score: BenchmarkScore
-    let isExpanded: Bool
-    let history: ModelHistoryPayload?
-    let onToggle: () -> Void
+    let onHoverChange: (BenchmarkRowHoverInfo?) -> Void
+    let onSelect: () -> Void
+
+    @State private var rowFrame: CGRect = .zero
+    @State private var isHovered = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Button(action: onToggle) {
-                HStack(spacing: 8) {
-                    Text("#\(rank)")
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 24, alignment: .trailing)
+        Button(action: onSelect) {
+            HStack(spacing: 8) {
+                Text("#\(rank)")
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 24, alignment: .trailing)
 
-                    Text(score.name)
-                        .font(.system(size: 11, design: .monospaced))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(maxWidth: 140, alignment: .leading)
+                Text(score.name)
+                    .font(.system(size: 11, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: 140, alignment: .leading)
 
-                    VendorChip(vendor: score.provider)
+                VendorChip(vendor: score.provider)
 
-                    ScoreBar(
-                        score: score.currentScore,
-                        lower: score.confidenceLower,
-                        upper: score.confidenceUpper,
-                        color: score.status.color
-                    )
-                    .frame(height: 8)
-                    .frame(maxWidth: .infinity)
+                ScoreBar(
+                    score: score.currentScore,
+                    lower: score.confidenceLower,
+                    upper: score.confidenceUpper,
+                    color: score.status.color
+                )
+                .frame(height: 8)
+                .frame(maxWidth: .infinity)
 
-                    Text("\(Int(score.currentScore.rounded()))")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.primary)
-                        .frame(width: 22, alignment: .trailing)
+                Text("\(Int(score.currentScore.rounded()))")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .frame(width: 22, alignment: .trailing)
 
-                    Image(systemName: score.trend.symbol)
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(score.trend.color)
-                        .frame(width: 10)
-                }
-                .contentShape(Rectangle())
+                Image(systemName: score.trend.symbol)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(score.trend.color)
+                    .frame(width: 10)
             }
-            .buttonStyle(.plain)
-
-            if isExpanded, let history {
-                ModelHistorySparkline(points: history.history)
-                    .frame(height: 20)
-                    .padding(.leading, 32)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onChange(of: proxy.frame(in: .named("menu")), initial: true) { _, frame in
+                        rowFrame = frame
+                        if isHovered {
+                            emitHoverChange(frame: frame)
+                        }
+                    }
             }
         }
+        .onHover { hovering in
+            isHovered = hovering
+            if hovering {
+                emitHoverChange(frame: rowFrame)
+            } else {
+                onHoverChange(nil)
+            }
+        }
+        .onDisappear {
+            isHovered = false
+            onHoverChange(nil)
+        }
+    }
+
+    private func emitHoverChange(frame: CGRect) {
+        onHoverChange(
+            BenchmarkRowHoverInfo(
+                score: score,
+                anchorX: frame.midX,
+                rowMinY: frame.minY,
+                rowMaxY: frame.maxY
+            )
+        )
     }
 }
 
-private struct VendorChip: View {
+struct VendorChip: View {
     let vendor: String
 
     var body: some View {
-        Text(vendor.prefix(3).uppercased())
+        Text(BenchmarkVendorPresentation.chipText(for: vendor))
             .font(.system(size: 8, weight: .bold, design: .rounded))
             .foregroundStyle(.white)
             .padding(.horizontal, 4)
             .padding(.vertical, 1)
             .background(
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .fill(chipColor)
+                    .fill(BenchmarkVendorPresentation.color(for: vendor))
             )
-    }
-
-    private var chipColor: Color {
-        switch vendor.lowercased() {
-        case "openai": return .green
-        case "anthropic": return .orange
-        case "google": return .blue
-        case "xai": return .purple
-        case "deepseek": return .cyan
-        case "kimi": return .pink
-        case "glm": return .indigo
-        default: return .gray
-        }
     }
 }
 
@@ -463,7 +541,7 @@ private struct VendorComparisonView: View {
                     HStack(spacing: 8) {
                         VendorChip(vendor: row.provider)
 
-                        Text(row.provider.capitalized)
+                        Text(BenchmarkVendorPresentation.displayName(for: row.provider))
                             .font(.system(size: 11, weight: .medium))
                             .frame(maxWidth: 80, alignment: .leading)
 
@@ -591,7 +669,7 @@ private struct AlertsListView: View {
                             .font(.system(size: 11, weight: .medium))
                             .lineLimit(1)
                         HStack(spacing: 4) {
-                            Text(alert.provider.capitalized)
+                            Text(BenchmarkVendorPresentation.displayName(for: alert.provider))
                                 .font(.system(size: 10))
                                 .foregroundStyle(.secondary)
                             if let time = alert.detectedAt {
