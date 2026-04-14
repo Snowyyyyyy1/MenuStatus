@@ -2,7 +2,9 @@ import SwiftUI
 
 struct AIStupidLevelPageView: View {
     let benchmarkStore: AIStupidLevelStore
+    let availableProviders: [ProviderConfig]
     let onNavigateToProvider: (ProviderConfig) -> Void
+    let onHoverChange: (BenchmarkRowHoverInfo?) -> Void
 
     @State private var globalIndexExpanded = true
     @State private var rankingExpanded = true
@@ -31,9 +33,9 @@ struct AIStupidLevelPageView: View {
                     isExpanded: $rankingExpanded
                 ) {
                     ModelRankingView(
+                        benchmarkStore: benchmarkStore,
                         scores: benchmarkStore.scores,
-                        historyByModelID: benchmarkStore.historyByModelID,
-                        onLoadHistory: { benchmarkStore.loadHistoryIfNeeded(modelId: $0) }
+                        onHoverChange: onHoverChange
                     )
                 }
             }
@@ -44,6 +46,9 @@ struct AIStupidLevelPageView: View {
             degradationsSection
         }
         .padding(.bottom, 8)
+        .onDisappear {
+            onHoverChange(nil)
+        }
     }
 
     @ViewBuilder
@@ -109,9 +114,7 @@ struct AIStupidLevelPageView: View {
     }
 
     private func findProvider(forVendor vendorName: String) -> ProviderConfig? {
-        ProviderConfig.builtInProviders.first {
-            $0.aiStupidLevelVendor?.caseInsensitiveCompare(vendorName) == .orderedSame
-        }
+        ProviderConfig.provider(matchingBenchmarkVendor: vendorName, in: availableProviders)
     }
 }
 
@@ -294,12 +297,12 @@ private struct LargeIndexChart: View {
 // MARK: - Section 2: Model Ranking
 
 private struct ModelRankingView: View {
+    let benchmarkStore: AIStupidLevelStore
     let scores: [BenchmarkScore]
-    let historyByModelID: [String: ModelHistoryPayload]
-    let onLoadHistory: (String) -> Void
+    let onHoverChange: (BenchmarkRowHoverInfo?) -> Void
+    @Environment(\.openURL) private var openURL
 
     @State private var vendorFilter: String?
-    @State private var expandedModelID: String?
 
     private var orderedVendors: [String] {
         BenchmarkVendorPresentation.orderedVendorIDs(from: scores.map(\.provider))
@@ -309,6 +312,10 @@ private struct ModelRankingView: View {
         let sorted = scores.sorted { $0.currentScore > $1.currentScore }
         guard let filter = vendorFilter else { return sorted }
         return sorted.filter { $0.provider.caseInsensitiveCompare(filter) == .orderedSame }
+    }
+
+    private var prefetchedModelIDs: [String] {
+        Array(filteredScores.prefix(6).map(\.id))
     }
 
     var body: some View {
@@ -326,18 +333,20 @@ private struct ModelRankingView: View {
                 RankedModelRow(
                     rank: rank + 1,
                     score: score,
-                    isExpanded: expandedModelID == score.id,
-                    history: historyByModelID[score.id]
-                ) {
-                    if expandedModelID == score.id {
-                        expandedModelID = nil
-                    } else {
-                        expandedModelID = score.id
-                        onLoadHistory(score.id)
-                    }
-                }
+                    onHoverChange: onHoverChange,
+                    onSelect: { openModelDetail(for: score) }
+                )
             }
         }
+        .task(id: prefetchedModelIDs) {
+            guard !prefetchedModelIDs.isEmpty else { return }
+            await benchmarkStore.prefetchHoverDataIfNeeded(modelIDs: prefetchedModelIDs)
+        }
+    }
+
+    private func openModelDetail(for score: BenchmarkScore) {
+        guard let url = AIStupidLevelClient.modelDetailPageURL(modelId: score.id) else { return }
+        openURL(url)
     }
 }
 
@@ -421,56 +430,84 @@ private struct BenchmarkVendorTab: View {
 private struct RankedModelRow: View {
     let rank: Int
     let score: BenchmarkScore
-    let isExpanded: Bool
-    let history: ModelHistoryPayload?
-    let onToggle: () -> Void
+    let onHoverChange: (BenchmarkRowHoverInfo?) -> Void
+    let onSelect: () -> Void
+
+    @State private var rowFrame: CGRect = .zero
+    @State private var isHovered = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Button(action: onToggle) {
-                HStack(spacing: 8) {
-                    Text("#\(rank)")
-                        .font(.system(size: 10, weight: .medium, design: .rounded))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 24, alignment: .trailing)
+        Button(action: onSelect) {
+            HStack(spacing: 8) {
+                Text("#\(rank)")
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 24, alignment: .trailing)
 
-                    Text(score.name)
-                        .font(.system(size: 11, design: .monospaced))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(maxWidth: 140, alignment: .leading)
+                Text(score.name)
+                    .font(.system(size: 11, design: .monospaced))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: 140, alignment: .leading)
 
-                    VendorChip(vendor: score.provider)
+                VendorChip(vendor: score.provider)
 
-                    ScoreBar(
-                        score: score.currentScore,
-                        lower: score.confidenceLower,
-                        upper: score.confidenceUpper,
-                        color: score.status.color
-                    )
-                    .frame(height: 8)
-                    .frame(maxWidth: .infinity)
+                ScoreBar(
+                    score: score.currentScore,
+                    lower: score.confidenceLower,
+                    upper: score.confidenceUpper,
+                    color: score.status.color
+                )
+                .frame(height: 8)
+                .frame(maxWidth: .infinity)
 
-                    Text("\(Int(score.currentScore.rounded()))")
-                        .font(.system(size: 11, weight: .semibold, design: .rounded))
-                        .foregroundStyle(.primary)
-                        .frame(width: 22, alignment: .trailing)
+                Text("\(Int(score.currentScore.rounded()))")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .frame(width: 22, alignment: .trailing)
 
-                    Image(systemName: score.trend.symbol)
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(score.trend.color)
-                        .frame(width: 10)
-                }
-                .contentShape(Rectangle())
+                Image(systemName: score.trend.symbol)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(score.trend.color)
+                    .frame(width: 10)
             }
-            .buttonStyle(.plain)
-
-            if isExpanded, let history {
-                ModelHistorySparkline(points: history.history)
-                    .frame(height: 20)
-                    .padding(.leading, 32)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onChange(of: proxy.frame(in: .named("menu")), initial: true) { _, frame in
+                        rowFrame = frame
+                        if isHovered {
+                            emitHoverChange(frame: frame)
+                        }
+                    }
             }
         }
+        .onHover { hovering in
+            isHovered = hovering
+            if hovering {
+                emitHoverChange(frame: rowFrame)
+            } else {
+                onHoverChange(nil)
+            }
+        }
+        .onDisappear {
+            isHovered = false
+            onHoverChange(nil)
+        }
+    }
+
+    private func emitHoverChange(frame: CGRect) {
+        onHoverChange(
+            BenchmarkRowHoverInfo(
+                score: score,
+                anchorX: frame.midX,
+                rowMinY: frame.minY,
+                rowMaxY: frame.maxY
+            )
+        )
     }
 }
 

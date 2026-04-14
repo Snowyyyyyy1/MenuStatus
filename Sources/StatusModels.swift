@@ -81,6 +81,21 @@ extension ProviderConfig {
     static let builtInProviders: [ProviderConfig] = [
         .openAI, .anthropic,
     ]
+
+    static func provider(
+        matchingBenchmarkVendor vendor: String,
+        in providers: [ProviderConfig]
+    ) -> ProviderConfig? {
+        let canonicalDisplayName = BenchmarkVendorPresentation.displayName(for: vendor)
+
+        return providers.first {
+            $0.aiStupidLevelVendor?.caseInsensitiveCompare(vendor) == .orderedSame
+        } ?? providers.first {
+            $0.id.caseInsensitiveCompare(vendor) == .orderedSame
+                || $0.displayName.caseInsensitiveCompare(canonicalDisplayName) == .orderedSame
+                || $0.displayName.caseInsensitiveCompare(vendor) == .orderedSame
+        }
+    }
 }
 
 // MARK: - Statuspage API Response
@@ -318,7 +333,7 @@ struct ScheduledMaintenancesResponse: Codable {
     let scheduledMaintenances: [Incident]
 }
 
-struct HistoryPageIncident {
+struct HistoryPageIncident: Codable {
     let code: String
     let name: String
     let impact: StatusIndicator?
@@ -685,14 +700,14 @@ struct GroupedComponentSection: Identifiable {
     }
 }
 
-struct OfficialHistorySnapshot {
+struct OfficialHistorySnapshot: Codable {
     let generatedAt: Date?
     let groups: [OfficialHistoryGroup]
     let componentsByID: [String: OfficialHistoryComponent]
     let incidentNames: [String: String]  // incidentId → name
 }
 
-struct OfficialHistoryGroup {
+struct OfficialHistoryGroup: Codable {
     let id: String
     let name: String
     let hidden: Bool
@@ -700,7 +715,7 @@ struct OfficialHistoryGroup {
     let uptimePercent: Double?
 }
 
-struct OfficialHistoryComponent {
+struct OfficialHistoryComponent: Codable {
     let id: String
     let name: String
     let hidden: Bool
@@ -710,9 +725,40 @@ struct OfficialHistoryComponent {
     let timelineSource: OfficialTimelineSource
 }
 
-enum OfficialTimelineSource {
+enum OfficialTimelineSource: Codable {
     case impacts([OfficialComponentImpact])
     case colors([String])
+
+    private enum CodingKeys: String, CodingKey {
+        case type, impacts, colors
+    }
+
+    private enum SourceType: String, Codable {
+        case impacts, colors
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(SourceType.self, forKey: .type)
+        switch type {
+        case .impacts:
+            self = .impacts(try container.decode([OfficialComponentImpact].self, forKey: .impacts))
+        case .colors:
+            self = .colors(try container.decode([String].self, forKey: .colors))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .impacts(let impacts):
+            try container.encode(SourceType.impacts, forKey: .type)
+            try container.encode(impacts, forKey: .impacts)
+        case .colors(let colors):
+            try container.encode(SourceType.colors, forKey: .type)
+            try container.encode(colors, forKey: .colors)
+        }
+    }
 }
 
 extension OfficialHistoryComponent {
@@ -796,7 +842,7 @@ struct OpenAIOfficialHistoryData: Decodable {
     }
 }
 
-struct OfficialComponentImpact: Decodable {
+struct OfficialComponentImpact: Codable {
     let componentId: String
     let endAt: String?
     let startAt: String
@@ -832,7 +878,7 @@ struct OfficialComponentUptime: Decodable {
     }
 }
 
-enum OfficialImpactStatus: String, Decodable {
+enum OfficialImpactStatus: String, Codable {
     case degradedPerformance = "degraded_performance"
     case partialOutage = "partial_outage"
     case fullOutage = "full_outage"

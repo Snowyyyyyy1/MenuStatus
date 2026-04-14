@@ -2,6 +2,13 @@ import XCTest
 @testable import MenuStatus
 
 final class AIStupidLevelClientTests: XCTestCase {
+    func testModelDetailPageURLUsesModelIDPath() {
+        XCTAssertEqual(
+            AIStupidLevelClient.modelDetailPageURL(modelId: "38")?.absoluteString,
+            "https://aistupidlevel.info/models/38"
+        )
+    }
+
     func testParseDashboardScoresResponse() throws {
         let json = """
         {
@@ -213,5 +220,85 @@ final class AIStupidLevelClientTests: XCTestCase {
         XCTAssertEqual(decoded.modelId, 38)
         XCTAssertEqual(decoded.history.count, 1)
         XCTAssertEqual(decoded.history[0].stupidScore, 74)
+    }
+
+    func testDecodeModelDetail() throws {
+        let json = """
+        {
+          "id": 38,
+          "name": "claude-opus-4-1-20250805",
+          "vendor": "anthropic",
+          "version": "2025-08-05",
+          "notes": "Claude Opus 4.1 - most powerful",
+          "createdAt": "2024-01-01T00:00:00.000Z",
+          "displayName": null,
+          "showInRankings": true,
+          "supportsToolCalling": false,
+          "maxToolsPerCall": 10,
+          "toolCallReliability": 0,
+          "usesReasoningEffort": false,
+          "latestScore": {
+            "id": 117257,
+            "modelId": 38,
+            "ts": "2026-04-13T10:00:35.465Z",
+            "stupidScore": 76,
+            "axes": {
+              "correctness": 1,
+              "spec": 0.8613038520844984,
+              "codeQuality": 0.8344508381718067,
+              "efficiency": 0.6566467159075685,
+              "stability": 1,
+              "refusal": 1,
+              "recovery": 1
+            },
+            "suite": "hourly",
+            "displayScore": 76,
+            "sampleSize": 5
+          }
+        }
+        """
+
+        let decoded = try AIStupidLevelClient.decodeModelDetail(Data(json.utf8))
+        XCTAssertEqual(decoded.id, 38)
+        XCTAssertEqual(decoded.name, "claude-opus-4-1-20250805")
+        XCTAssertEqual(decoded.vendor, "anthropic")
+        XCTAssertEqual(decoded.version, "2025-08-05")
+        XCTAssertEqual(decoded.notes, "Claude Opus 4.1 - most powerful")
+        XCTAssertEqual(decoded.supportsToolCalling, false)
+        XCTAssertEqual(decoded.maxToolsPerCall, 10)
+        XCTAssertEqual(decoded.usesReasoningEffort, false)
+        XCTAssertEqual(decoded.latestScore?.displayScore, 76)
+        XCTAssertEqual(decoded.latestScore?.sampleSize, 5)
+    }
+
+    func testDecodeModelStats() throws {
+        let json = """
+        {
+          "modelId": 38,
+          "currentScore": 66,
+          "totalRuns": 7887,
+          "successfulRuns": 7779,
+          "successRate": 99,
+          "averageCorrectness": 0.9807955123315535,
+          "averageLatency": 4548.451756054266,
+          "debug": {
+            "period": "latest",
+            "sortBy": "combined",
+            "suite": "hourly",
+            "calculationMethod": "combined-average"
+          }
+        }
+        """
+
+        let decoded = try AIStupidLevelClient.decodeModelStats(Data(json.utf8))
+        XCTAssertEqual(decoded.modelId, 38)
+        XCTAssertEqual(decoded.currentScore, 66)
+        XCTAssertEqual(decoded.totalRuns, 7887)
+        XCTAssertEqual(decoded.successfulRuns, 7779)
+        XCTAssertEqual(decoded.successRate, 99)
+        XCTAssertEqual(decoded.averageCorrectness, 0.9807955123315535)
+        XCTAssertEqual(decoded.averageLatency, 4548.451756054266)
+        XCTAssertEqual(decoded.debug?.period, "latest")
+        XCTAssertEqual(decoded.debug?.sortBy, "combined")
     }
 }

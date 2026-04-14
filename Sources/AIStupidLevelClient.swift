@@ -15,6 +15,10 @@ enum AIStupidLevelClientError: LocalizedError {
 struct AIStupidLevelClient {
     static let baseURL = URL(string: "https://aistupidlevel.info")!
 
+    static func modelDetailPageURL(modelId: String) -> URL? {
+        baseURL.appendingPathComponent("models").appendingPathComponent(modelId)
+    }
+
     private static let decoder: JSONDecoder = {
         let d = JSONDecoder()
         return d
@@ -56,6 +60,26 @@ struct AIStupidLevelClient {
         try await fetchAndDecode(path: "/api/analytics/provider-reliability", as: ProviderReliabilityResponse.self)
     }
 
+    static func fetchModelDetail(modelId: String) async throws -> BenchmarkModelDetail {
+        let data = try await fetchData(path: "/api/models/\(modelId)")
+        return try decoder.decode(BenchmarkModelDetail.self, from: data)
+    }
+
+    static func fetchModelStats(
+        modelId: String,
+        period: String = "latest",
+        sortBy: String = "combined"
+    ) async throws -> BenchmarkModelStats {
+        let data = try await fetchData(
+            path: "/api/models/\(modelId)/stats",
+            queryItems: [
+                URLQueryItem(name: "period", value: period),
+                URLQueryItem(name: "sortBy", value: sortBy)
+            ]
+        )
+        return try decoder.decode(BenchmarkModelStats.self, from: data)
+    }
+
     static func fetchModelHistory(modelId: String) async throws -> ModelHistoryPayload {
         let data = try await fetchData(path: "/api/models/\(modelId)/history")
         return try decoder.decode(ModelHistoryPayload.self, from: data)
@@ -90,6 +114,14 @@ struct AIStupidLevelClient {
         try decode(data, as: ProviderReliabilityResponse.self)
     }
 
+    static func decodeModelDetail(_ data: Data) throws -> BenchmarkModelDetail {
+        try decoder.decode(BenchmarkModelDetail.self, from: data)
+    }
+
+    static func decodeModelStats(_ data: Data) throws -> BenchmarkModelStats {
+        try decoder.decode(BenchmarkModelStats.self, from: data)
+    }
+
     static func decodeModelHistory(_ data: Data) throws -> ModelHistoryPayload {
         try decoder.decode(ModelHistoryPayload.self, from: data)
     }
@@ -107,8 +139,15 @@ struct AIStupidLevelClient {
         return response.data
     }
 
-    private static func fetchData(path: String) async throws -> Data {
-        let url = baseURL.appendingPathComponent(path)
+    private static func fetchData(path: String, queryItems: [URLQueryItem] = []) async throws -> Data {
+        let basePathURL = baseURL.appendingPathComponent(path)
+        var components = URLComponents(url: basePathURL, resolvingAgainstBaseURL: false)
+        if !queryItems.isEmpty {
+            components?.queryItems = queryItems
+        }
+        guard let url = components?.url else {
+            throw AIStupidLevelClientError.apiFailure("Invalid URL for path \(path)")
+        }
         let (data, response) = try await session.data(from: url)
         guard let http = response as? HTTPURLResponse else {
             throw AIStupidLevelClientError.httpFailure(-1)

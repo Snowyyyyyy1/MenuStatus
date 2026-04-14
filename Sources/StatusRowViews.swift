@@ -1,6 +1,6 @@
 import SwiftUI
 
-private enum UptimeBarStyle {
+enum UptimeBarStyle {
     static let height: CGFloat = 22
     static let tooltipWidth: CGFloat = 220
 }
@@ -278,6 +278,7 @@ struct UptimeBarView: View {
 struct DayDetailTooltip: View {
     let day: DayStatus
     let details: [DayIncidentDetail]
+    @Environment(\.colorScheme) private var colorScheme
 
     private static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -314,7 +315,7 @@ struct DayDetailTooltip: View {
                         Spacer()
                         Text(formatDuration(entry.totalSeconds))
                             .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.primary.opacity(HoverSurfaceStyle.secondaryTextOpacity(for: colorScheme)))
                     }
                 }
 
@@ -322,19 +323,17 @@ struct DayDetailTooltip: View {
                     Divider()
                     Text("RELATED")
                         .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.primary.opacity(HoverSurfaceStyle.tertiaryTextOpacity(for: colorScheme)))
                     ForEach(incidentNames, id: \.self) { name in
                         Text(name)
                             .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.primary.opacity(HoverSurfaceStyle.secondaryTextOpacity(for: colorScheme)))
                     }
                 }
             }
         }
-        .padding(10)
         .frame(width: UptimeBarStyle.tooltipWidth)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
+        .readableHoverSurface()
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {

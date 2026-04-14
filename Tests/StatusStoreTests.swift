@@ -2,6 +2,51 @@ import XCTest
 @testable import MenuStatus
 
 final class StatusStoreTests: XCTestCase {
+    func testMenuErrorPresentationKeepsBenchmarkErrorsOutOfFooter() {
+        let messages = MenuErrorPresentation.messages(
+            for: .benchmark,
+            statusError: "Offline",
+            benchmarkError: "Benchmark scores: HTTP 500\nGlobal index: HTTP 500"
+        )
+
+        XCTAssertEqual(messages.inline, "Benchmark scores: HTTP 500\nGlobal index: HTTP 500")
+        XCTAssertNil(messages.footer)
+    }
+
+    func testMenuErrorPresentationKeepsProviderErrorsInFooter() {
+        let provider = ProviderConfig.openAI
+        let messages = MenuErrorPresentation.messages(
+            for: .provider(provider),
+            statusError: "OpenAI: HTTP 500",
+            benchmarkError: "Benchmark scores: HTTP 500"
+        )
+
+        XCTAssertNil(messages.inline)
+        XCTAssertEqual(messages.footer, "OpenAI: HTTP 500")
+    }
+
+    func testProviderConfigMatchesBenchmarkVendorUsingVendorIDAndDisplayName() {
+        let deepSeek = ProviderConfig(
+            id: "deepseek-status",
+            displayName: "DeepSeek",
+            baseURL: URL(string: "https://status.deepseek.com")!,
+            platform: .atlassianStatuspage,
+            isBuiltIn: false
+        )
+
+        XCTAssertEqual(
+            ProviderConfig.provider(matchingBenchmarkVendor: "openai", in: [.anthropic, .openAI])?.id,
+            ProviderConfig.openAI.id
+        )
+        XCTAssertEqual(
+            ProviderConfig.provider(matchingBenchmarkVendor: "deepseek", in: [.anthropic, deepSeek])?.id,
+            deepSeek.id
+        )
+        XCTAssertNil(
+            ProviderConfig.provider(matchingBenchmarkVendor: "xai", in: [.anthropic, .openAI])
+        )
+    }
+
     func testTooltipOffsetUsesMeasuredMenuWidth() {
         XCTAssertEqual(
             MenuLayoutMetrics.tooltipOffsetX(dayX: 260, menuWidth: 300),
@@ -17,7 +62,8 @@ final class StatusStoreTests: XCTestCase {
 
     @MainActor
     func testUnhealthyGroupsAutoExpandUntilUserOverridesThem() {
-        let settings = SettingsStore()
+        let defaults = makeIsolatedDefaults(testName: #function)
+        let settings = SettingsStore(defaults: defaults)
         settings.attachProviderConfigs(ProviderConfigStore())
         let store = StatusStore(settings: settings)
         let provider = ProviderConfig.openAI
@@ -34,6 +80,155 @@ final class StatusStoreTests: XCTestCase {
         store.toggleExpansion(for: unhealthySection, provider: provider)
 
         XCTAssertFalse(store.isExpanded(unhealthySection, provider: provider))
+    }
+
+    @MainActor
+    func testGroupExpansionOverridePersistsAcrossStoreRecreation() {
+        let defaults = makeIsolatedDefaults(testName: #function)
+        let providerStore = ProviderConfigStore()
+        let section = GroupedComponentSection(
+            id: "group-apis",
+            title: "APIs",
+            components: [makeComponent(id: "comp-chat", name: "Chat Completions", status: .partialOutage)],
+            status: .partialOutage,
+            timeline: nil
+        )
+
+        let firstSettings = SettingsStore(defaults: defaults)
+        firstSettings.attachProviderConfigs(providerStore)
+        let firstStore = StatusStore(settings: firstSettings)
+
+        XCTAssertTrue(firstStore.isExpanded(section, provider: ProviderConfig.openAI))
+
+        firstStore.toggleExpansion(for: section, provider: ProviderConfig.openAI)
+        XCTAssertFalse(firstStore.isExpanded(section, provider: ProviderConfig.openAI))
+
+        let secondSettings = SettingsStore(defaults: defaults)
+        secondSettings.attachProviderConfigs(providerStore)
+        let secondStore = StatusStore(settings: secondSettings)
+
+        XCTAssertFalse(secondStore.isExpanded(section, provider: ProviderConfig.openAI))
+    }
+
+    @MainActor
+    func testPersistentStatusSnapshotSurvivesStoreRecreation() async {
+        let defaults = makeIsolatedDefaults(testName: #function)
+        let providerStore = ProviderConfigStore()
+        let settings = SettingsStore(defaults: defaults)
+        settings.attachProviderConfigs(providerStore)
+
+        let provider = ProviderConfig.openAI
+        let summary = StatuspageSummary(
+            page: StatusPage(
+                id: "page",
+                name: "OpenAI",
+                url: "https://status.openai.com",
+                timeZone: "Etc/UTC",
+                updatedAt: nil
+            ),
+            status: OverallStatus(indicator: .minor, description: "Minor Issues"),
+            components: [
+                Component(
+                    id: "comp-chat",
+                    name: "ChatGPT",
+                    status: .operational,
+                    position: 1,
+                    description: nil,
+                    startDate: nil,
+                    groupId: "group-apis",
+                    group: false,
+                    onlyShowIfDegraded: nil
+                ),
+                Component(
+                    id: "comp-api",
+                    name: "API",
+                    status: .partialOutage,
+                    position: 2,
+                    description: nil,
+                    startDate: nil,
+                    groupId: "group-apis",
+                    group: false,
+                    onlyShowIfDegraded: nil
+                ),
+                Component(
+                    id: "group-apis",
+                    name: "APIs",
+                    status: .partialOutage,
+                    position: 0,
+                    description: nil,
+                    startDate: nil,
+                    groupId: nil,
+                    group: true,
+                    onlyShowIfDegraded: nil
+                )
+            ],
+            incidents: [],
+            scheduledMaintenances: []
+        )
+        let officialHistory = OfficialHistorySnapshot(
+            generatedAt: Date(timeIntervalSince1970: 1_774_631_095),
+            groups: [
+                OfficialHistoryGroup(
+                    id: "group-apis",
+                    name: "APIs",
+                    hidden: false,
+                    componentIDs: ["comp-chat", "comp-api"],
+                    uptimePercent: 99.9
+                )
+            ],
+            componentsByID: [
+                "comp-chat": OfficialHistoryComponent(
+                    id: "comp-chat",
+                    name: "ChatGPT",
+                    hidden: false,
+                    displayUptime: true,
+                    dataAvailableSince: nil,
+                    uptimePercent: 99.99,
+                    timelineSource: .impacts([])
+                ),
+                "comp-api": OfficialHistoryComponent(
+                    id: "comp-api",
+                    name: "API",
+                    hidden: false,
+                    displayUptime: true,
+                    dataAvailableSince: nil,
+                    uptimePercent: 99.5,
+                    timelineSource: .impacts([
+                        OfficialComponentImpact(
+                            componentId: "comp-api",
+                            endAt: "2026-04-14T11:30:00Z",
+                            startAt: "2026-04-14T10:00:00Z",
+                            status: .partialOutage,
+                            statusPageIncidentId: "incident-1"
+                        )
+                    ])
+                )
+            ],
+            incidentNames: ["incident-1": "API partial outage"]
+        )
+
+        let fetcher = StatusStore.Fetcher(
+            fetchSummary: { _ in summary },
+            fetchOfficialHistory: { _ in officialHistory },
+            fetchIncidents: { _ in [] },
+            fetchScheduledMaintenances: { _ in [] },
+            fetchHistoryPageIncidents: { _ in [] }
+        )
+
+        let firstStore = StatusStore(settings: settings, defaults: defaults)
+        await firstStore.refreshNow(fetcher: fetcher)
+
+        let secondSettings = SettingsStore(defaults: defaults)
+        secondSettings.attachProviderConfigs(providerStore)
+        let secondStore = StatusStore(settings: secondSettings, defaults: defaults)
+
+        XCTAssertEqual(secondStore.summaries[provider]?.status.description, "Minor Issues")
+        XCTAssertEqual(secondStore.sections(for: provider).map { $0.title }, ["APIs"])
+        XCTAssertEqual(secondStore.timeline(for: provider, componentId: "comp-api")?.uptimePercent, 99.5)
+        XCTAssertEqual(
+            secondStore.dayDetails(for: provider, componentId: "comp-api").values.flatMap { $0 }.first?.incidentName,
+            "API partial outage"
+        )
     }
 
     func testParseOpenAIOfficialHistoryHTMLExtractsStructureAndMetrics() throws {
@@ -234,6 +429,16 @@ final class StatusStoreTests: XCTestCase {
 
         XCTAssertEqual(utcTimeline.days.map(\.level), [TimelineDayLevel.majorOutage, .majorOutage])
         XCTAssertEqual(availableTimeline.days.map(\.level), [.noData, .operational, .operational])
+    }
+
+    private func makeIsolatedDefaults(testName: String) -> UserDefaults {
+        let suiteName = "StatusStoreTests.\(testName)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        addTeardownBlock {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+        return defaults
     }
 }
 

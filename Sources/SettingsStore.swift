@@ -11,44 +11,52 @@ enum MenuBarIconStyle: Int, CaseIterable {
 @MainActor
 @Observable
 final class SettingsStore {
+    private let defaults: UserDefaults
+
     var refreshInterval: TimeInterval {
-        didSet { UserDefaults.standard.set(refreshInterval, forKey: Keys.refreshInterval) }
+        didSet { defaults.set(refreshInterval, forKey: Keys.refreshInterval) }
     }
 
     var launchAtLogin: Bool {
         didSet {
-            UserDefaults.standard.set(launchAtLogin, forKey: Keys.launchAtLogin)
+            defaults.set(launchAtLogin, forKey: Keys.launchAtLogin)
             updateLoginItem()
         }
     }
 
     var disabledProviderIDs: Set<String> {
         didSet {
-            UserDefaults.standard.set(Array(disabledProviderIDs), forKey: Keys.disabledProviderIDs)
+            defaults.set(Array(disabledProviderIDs), forKey: Keys.disabledProviderIDs)
         }
     }
 
     var iconStyle: MenuBarIconStyle {
-        didSet { UserDefaults.standard.set(iconStyle.rawValue, forKey: Keys.iconStyle) }
+        didSet { defaults.set(iconStyle.rawValue, forKey: Keys.iconStyle) }
     }
 
     var customProviderNames: [String: String] {
-        didSet { UserDefaults.standard.set(customProviderNames, forKey: Keys.customProviderNames) }
+        didSet { defaults.set(customProviderNames, forKey: Keys.customProviderNames) }
     }
 
     var providerOrder: [String] {
-        didSet { UserDefaults.standard.set(providerOrder, forKey: Keys.providerOrder) }
+        didSet { defaults.set(providerOrder, forKey: Keys.providerOrder) }
     }
 
     var removedBuiltInIDs: Set<String> {
         didSet {
-            UserDefaults.standard.set(Array(removedBuiltInIDs), forKey: Keys.removedBuiltInIDs)
+            defaults.set(Array(removedBuiltInIDs), forKey: Keys.removedBuiltInIDs)
         }
     }
 
     var benchmarkSectionExpanded: Set<String> {
         didSet {
-            UserDefaults.standard.set(Array(benchmarkSectionExpanded), forKey: Keys.benchmarkSectionExpanded)
+            defaults.set(Array(benchmarkSectionExpanded), forKey: Keys.benchmarkSectionExpanded)
+        }
+    }
+
+    var groupExpansionOverrides: [String: Bool] {
+        didSet {
+            defaults.set(groupExpansionOverrides, forKey: Keys.groupExpansionOverrides)
         }
     }
 
@@ -61,8 +69,8 @@ final class SettingsStore {
 
     private(set) var providerConfigs: ProviderConfigStore!
 
-    init() {
-        let defaults = UserDefaults.standard
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
 
         if let interval = defaults.object(forKey: Keys.refreshInterval) as? TimeInterval, interval > 0 {
             self.refreshInterval = interval
@@ -83,6 +91,7 @@ final class SettingsStore {
         self.providerOrder = defaults.stringArray(forKey: Keys.providerOrder) ?? []
         self.removedBuiltInIDs = Set(defaults.stringArray(forKey: Keys.removedBuiltInIDs) ?? [])
         self.benchmarkSectionExpanded = Set(defaults.stringArray(forKey: Keys.benchmarkSectionExpanded) ?? [])
+        self.groupExpansionOverrides = (defaults.dictionary(forKey: Keys.groupExpansionOverrides) as? [String: Bool]) ?? [:]
     }
 
     func attachProviderConfigs(_ store: ProviderConfigStore) {
@@ -120,6 +129,7 @@ final class SettingsStore {
         static let providerOrder = "providerOrder"
         static let removedBuiltInIDs = "removedBuiltInIDs"
         static let benchmarkSectionExpanded = "benchmarkSectionExpanded"
+        static let groupExpansionOverrides = "groupExpansionOverrides"
     }
 }
 

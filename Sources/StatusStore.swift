@@ -5,6 +5,37 @@ import Observation
 @MainActor
 @Observable
 final class StatusStore {
+    struct Fetcher {
+        let fetchSummary: @Sendable (ProviderConfig) async throws -> StatuspageSummary
+        let fetchOfficialHistory: @Sendable (ProviderConfig) async throws -> OfficialHistorySnapshot
+        let fetchIncidents: @Sendable (ProviderConfig) async throws -> [Incident]
+        let fetchScheduledMaintenances: @Sendable (ProviderConfig) async throws -> [Incident]
+        let fetchHistoryPageIncidents: @Sendable (ProviderConfig) async throws -> [HistoryPageIncident]
+
+        static let live = Fetcher(
+            fetchSummary: { try await StatusClient.fetchSummary(for: $0) },
+            fetchOfficialHistory: { try await StatusClient.fetchOfficialHistory(for: $0) },
+            fetchIncidents: { try await StatusClient.fetchIncidents(for: $0) },
+            fetchScheduledMaintenances: { try await StatusClient.fetchScheduledMaintenances(for: $0) },
+            fetchHistoryPageIncidents: { try await StatusClient.fetchHistoryPageIncidents(for: $0) }
+        )
+    }
+
+    private struct PersistedStatusProviderEntry: Codable {
+        let provider: ProviderConfig
+        let summary: StatuspageSummary
+        let officialHistory: OfficialHistorySnapshot?
+        let incidents: [Incident]
+        let maintenances: [Incident]
+        let historyPageIncidents: [HistoryPageIncident]
+    }
+
+    private struct PersistedStatusSnapshot: Codable {
+        let cachedAt: Date
+        let lastRefreshed: Date?
+        let entries: [PersistedStatusProviderEntry]
+    }
+
     var summaries: [ProviderConfig: StatuspageSummary] = [:]
     var componentTimelines: [ProviderConfig: [String: ComponentTimeline]] = [:]
     var groupedSections: [ProviderConfig: [GroupedComponentSection]] = [:]
@@ -18,10 +49,20 @@ final class StatusStore {
     private var groupExpansionOverrides: [String: Bool] = [:]
     private var pathMonitor: NWPathMonitor?
     private var debounceTask: Task<Void, Never>?
+    private let defaults: UserDefaults
+    private let now: () -> Date
     let settings: SettingsStore
 
-    init(settings: SettingsStore) {
+    init(
+        settings: SettingsStore,
+        defaults: UserDefaults = .standard,
+        now: @escaping () -> Date = Date.init
+    ) {
         self.settings = settings
+        self.defaults = defaults
+        self.now = now
+        self.groupExpansionOverrides = settings.groupExpansionOverrides
+        restorePersistentSnapshot()
     }
 
     var overallIndicator: StatusIndicator {
@@ -121,10 +162,16 @@ final class StatusStore {
     func toggleExpansion(for section: GroupedComponentSection, provider: ProviderConfig) {
         let key = "\(provider.id):\(section.id)"
         let currentValue = groupExpansionOverrides[key] ?? (section.status != .operational)
-        groupExpansionOverrides[key] = !currentValue
+        let nextValue = !currentValue
+        groupExpansionOverrides[key] = nextValue
+        settings.groupExpansionOverrides[key] = nextValue
     }
 
     func refreshNow() async {
+        await refreshNow(fetcher: .live)
+    }
+
+    func refreshNow(fetcher: Fetcher) async {
         guard !isLoading else { return }
         isLoading = true
         errorMessage = nil
@@ -136,7 +183,8 @@ final class StatusStore {
 
         let fetchResults = await Self.fetchAllProviderData(
             for: activeProviders,
-            existingSummaries: existingSummaries
+            existingSummaries: existingSummaries,
+            fetcher: fetcher
         )
 
         if !fetchResults.errors.isEmpty {
@@ -165,7 +213,14 @@ final class StatusStore {
         componentTimelines = derivedState.timelines
         groupedSections = derivedState.sections
         incidentLookup = builtIncidentLookup
-        lastRefreshed = Date()
+        lastRefreshed = now()
+        persistSnapshot(
+            summaries: fetchResults.summaries,
+            officialHistories: fetchResults.officialHistories,
+            incidents: fetchResults.incidents,
+            maintenances: fetchResults.maintenances,
+            historyPageIncidents: fetchResults.historyPageIncidents
+        )
         isLoading = false
     }
 
@@ -180,7 +235,8 @@ final class StatusStore {
 
     nonisolated private static func fetchAllProviderData(
         for providers: [ProviderConfig],
-        existingSummaries: [ProviderConfig: StatuspageSummary]
+        existingSummaries: [ProviderConfig: StatuspageSummary],
+        fetcher: Fetcher
     ) async -> ProviderFetchResults {
         enum FetchResult {
             case summary(ProviderConfig, Result<StatuspageSummary, Error>)
@@ -196,7 +252,7 @@ final class StatusStore {
             for provider in providers {
                 group.addTask {
                     do {
-                        let summary = try await StatusClient.fetchSummary(for: provider)
+                        let summary = try await fetcher.fetchSummary(provider)
                         return .summary(provider, .success(summary))
                     } catch {
                         return .summary(provider, .failure(error))
@@ -205,7 +261,7 @@ final class StatusStore {
 
                 group.addTask {
                     do {
-                        let history = try await StatusClient.fetchOfficialHistory(for: provider)
+                        let history = try await fetcher.fetchOfficialHistory(provider)
                         return .officialHistory(provider, .success(history))
                     } catch {
                         return .officialHistory(provider, .failure(error))
@@ -214,7 +270,7 @@ final class StatusStore {
 
                 group.addTask {
                     do {
-                        let incidents = try await StatusClient.fetchIncidents(for: provider)
+                        let incidents = try await fetcher.fetchIncidents(provider)
                         return .incidents(provider, .success(incidents))
                     } catch {
                         return .incidents(provider, .failure(error))
@@ -224,7 +280,7 @@ final class StatusStore {
                 if provider.platform == .atlassianStatuspage {
                     group.addTask {
                         do {
-                            let maintenances = try await StatusClient.fetchScheduledMaintenances(for: provider)
+                            let maintenances = try await fetcher.fetchScheduledMaintenances(provider)
                             return .maintenances(provider, .success(maintenances))
                         } catch {
                             return .maintenances(provider, .failure(error))
@@ -233,7 +289,7 @@ final class StatusStore {
 
                     group.addTask {
                         do {
-                            let historyIncidents = try await StatusClient.fetchHistoryPageIncidents(for: provider)
+                            let historyIncidents = try await fetcher.fetchHistoryPageIncidents(provider)
                             return .historyPage(provider, .success(historyIncidents))
                         } catch {
                             return .historyPage(provider, .failure(error))
@@ -269,6 +325,98 @@ final class StatusStore {
         }
 
         return results
+    }
+
+    private enum PersistentCache {
+        static let defaultsKey = "statusRawSnapshotCache"
+        static let ttl: TimeInterval = 300
+    }
+
+    private func restorePersistentSnapshot() {
+        guard let providerConfigs = settings.providerConfigs else { return }
+        guard
+            let data = defaults.data(forKey: PersistentCache.defaultsKey),
+            let snapshot = try? JSONDecoder().decode(PersistedStatusSnapshot.self, from: data)
+        else {
+            defaults.removeObject(forKey: PersistentCache.defaultsKey)
+            return
+        }
+
+        guard snapshot.cachedAt >= now().addingTimeInterval(-PersistentCache.ttl) else {
+            defaults.removeObject(forKey: PersistentCache.defaultsKey)
+            return
+        }
+
+        let activeProviders = providerConfigs.enabledProviders(settings: settings)
+        let activeSet = Set(activeProviders)
+        let entries = snapshot.entries.filter { activeSet.contains($0.provider) }
+        guard !entries.isEmpty else { return }
+
+        let summaries = Dictionary(uniqueKeysWithValues: entries.map { ($0.provider, $0.summary) })
+        let officialHistories = Dictionary(
+            uniqueKeysWithValues: entries.compactMap { entry in
+                entry.officialHistory.map { (entry.provider, $0) }
+            }
+        )
+        let incidents = Dictionary(uniqueKeysWithValues: entries.map { ($0.provider, $0.incidents) })
+        let maintenances = Dictionary(uniqueKeysWithValues: entries.map { ($0.provider, $0.maintenances) })
+        let historyPageIncidents = Dictionary(uniqueKeysWithValues: entries.map { ($0.provider, $0.historyPageIncidents) })
+
+        let builtIncidentLookup = Self.buildIncidentLookup(
+            providers: activeProviders,
+            incidents: incidents,
+            maintenances: maintenances,
+            historyPageIncidents: historyPageIncidents,
+            officialHistories: officialHistories,
+            summaries: summaries
+        )
+
+        let derivedState = Self.derivePresentationState(
+            providers: activeProviders,
+            summaries: summaries,
+            currentTimelines: [:],
+            currentSections: [:],
+            officialHistories: officialHistories,
+            incidentLookup: builtIncidentLookup
+        )
+
+        self.summaries = summaries
+        self.componentTimelines = derivedState.timelines
+        self.groupedSections = derivedState.sections
+        self.incidentLookup = builtIncidentLookup
+        self.lastRefreshed = snapshot.lastRefreshed
+    }
+
+    private func persistSnapshot(
+        summaries: [ProviderConfig: StatuspageSummary],
+        officialHistories: [ProviderConfig: OfficialHistorySnapshot],
+        incidents: [ProviderConfig: [Incident]],
+        maintenances: [ProviderConfig: [Incident]],
+        historyPageIncidents: [ProviderConfig: [HistoryPageIncident]]
+    ) {
+        let entries = summaries.keys.sorted { $0.id < $1.id }.map { provider in
+            PersistedStatusProviderEntry(
+                provider: provider,
+                summary: summaries[provider]!,
+                officialHistory: officialHistories[provider],
+                incidents: incidents[provider] ?? [],
+                maintenances: maintenances[provider] ?? [],
+                historyPageIncidents: historyPageIncidents[provider] ?? []
+            )
+        }
+
+        guard !entries.isEmpty else {
+            defaults.removeObject(forKey: PersistentCache.defaultsKey)
+            return
+        }
+
+        let snapshot = PersistedStatusSnapshot(
+            cachedAt: now(),
+            lastRefreshed: lastRefreshed,
+            entries: entries
+        )
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        defaults.set(data, forKey: PersistentCache.defaultsKey)
     }
 
     func dayDetails(for provider: ProviderConfig, componentId: String) -> [Date: [DayIncidentDetail]] {
