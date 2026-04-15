@@ -374,17 +374,18 @@ struct StatusMenuContentView: View {
 
             selectedProviderContent
         }
-            .frame(width: measuredMenuWidth, alignment: .topLeading)
-            .background {
-                GeometryReader { proxy in
-                    Color.clear
-                        .onChange(of: proxy.size.height, initial: true) { _, h in
-                            contentHeights[activeSelection] = h
-                            lastMeasuredContentHeight = h
-                            if !initialMeasurementDone { initialMeasurementDone = true }
-                        }
-                }
+        .id(activeSelection)
+        .frame(width: measuredMenuWidth, alignment: .topLeading)
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onChange(of: proxy.size.height, initial: true) { _, h in
+                        contentHeights[activeSelection] = h
+                        lastMeasuredContentHeight = h
+                        if !initialMeasurementDone { initialMeasurementDone = true }
+                    }
             }
+        }
     }
 
     @ViewBuilder
