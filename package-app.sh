@@ -3,31 +3,15 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-VERSION="${1:-${MENU_STATUS_VERSION:-${RELEASE_VERSION:-0.0.0-dev}}}"
 APP_NAME="MenuStatus"
 DERIVED=".build"
 OUTPUT_DIR="${OUTPUT_DIR:-dist}"
 DMG_STAGING_DIR="$OUTPUT_DIR/dmg-root"
-DMG_PATH="$OUTPUT_DIR/$APP_NAME-$VERSION.dmg"
 USE_CREATE_DMG="${USE_CREATE_DMG:-0}"
-BUILD_NUMBER="${MENU_STATUS_BUILD:-0}"
-FEED_URL="${MENU_STATUS_FEED_URL:-}"
-PUBLIC_ED_KEY="${MENU_STATUS_PUBLIC_ED_KEY:-}"
-
-export MENU_STATUS_VERSION="$VERSION"
-export MENU_STATUS_BUILD="$BUILD_NUMBER"
-export MENU_STATUS_FEED_URL="$FEED_URL"
-export MENU_STATUS_PUBLIC_ED_KEY="$PUBLIC_ED_KEY"
-export TUIST_APP_VERSION="$MENU_STATUS_VERSION"
-export TUIST_APP_BUILD="$MENU_STATUS_BUILD"
-export TUIST_APP_FEED_URL="$MENU_STATUS_FEED_URL"
-export TUIST_APP_PUBLIC_ED_KEY="$MENU_STATUS_PUBLIC_ED_KEY"
 
 cleanup() {
     rm -rf "$DMG_STAGING_DIR"
 }
-
-trap cleanup EXIT
 
 require_value() {
     local name="$1"
@@ -36,6 +20,13 @@ require_value() {
         echo "Error: $name must be set for release packaging."
         exit 1
     fi
+}
+
+normalize_metadata_value() {
+    local value="${1:-}"
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    printf '%s' "$value"
 }
 
 read_plist_value() {
@@ -52,10 +43,10 @@ validate_release_metadata() {
     local actual_feed_url
     local actual_public_key
 
-    actual_version="$(read_plist_value "$plist" CFBundleShortVersionString)"
-    actual_build="$(read_plist_value "$plist" CFBundleVersion)"
-    actual_feed_url="$(read_plist_value "$plist" SUFeedURL)"
-    actual_public_key="$(read_plist_value "$plist" SUPublicEDKey)"
+    actual_version="$(normalize_metadata_value "$(read_plist_value "$plist" CFBundleShortVersionString)")"
+    actual_build="$(normalize_metadata_value "$(read_plist_value "$plist" CFBundleVersion)")"
+    actual_feed_url="$(normalize_metadata_value "$(read_plist_value "$plist" SUFeedURL)")"
+    actual_public_key="$(normalize_metadata_value "$(read_plist_value "$plist" SUPublicEDKey)")"
 
     if [ "$actual_version" != "$MENU_STATUS_VERSION" ]; then
         echo "Error: CFBundleShortVersionString is '$actual_version' but expected '$MENU_STATUS_VERSION'."
@@ -77,6 +68,30 @@ validate_release_metadata() {
         exit 1
     fi
 }
+
+if [ "${PACKAGE_APP_SOURCE_ONLY:-0}" = "1" ]; then
+    if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+        return 0
+    fi
+    exit 0
+fi
+
+VERSION="$(normalize_metadata_value "${1:-${MENU_STATUS_VERSION:-${RELEASE_VERSION:-0.0.0-dev}}}")"
+BUILD_NUMBER="$(normalize_metadata_value "${MENU_STATUS_BUILD:-0}")"
+FEED_URL="$(normalize_metadata_value "${MENU_STATUS_FEED_URL:-}")"
+PUBLIC_ED_KEY="$(normalize_metadata_value "${MENU_STATUS_PUBLIC_ED_KEY:-}")"
+DMG_PATH="$OUTPUT_DIR/$APP_NAME-$VERSION.dmg"
+
+export MENU_STATUS_VERSION="$VERSION"
+export MENU_STATUS_BUILD="$BUILD_NUMBER"
+export MENU_STATUS_FEED_URL="$FEED_URL"
+export MENU_STATUS_PUBLIC_ED_KEY="$PUBLIC_ED_KEY"
+export TUIST_APP_VERSION="$MENU_STATUS_VERSION"
+export TUIST_APP_BUILD="$MENU_STATUS_BUILD"
+export TUIST_APP_FEED_URL="$MENU_STATUS_FEED_URL"
+export TUIST_APP_PUBLIC_ED_KEY="$MENU_STATUS_PUBLIC_ED_KEY"
+
+trap cleanup EXIT
 
 require_value "MENU_STATUS_VERSION" "$MENU_STATUS_VERSION"
 require_value "MENU_STATUS_BUILD" "$MENU_STATUS_BUILD"
