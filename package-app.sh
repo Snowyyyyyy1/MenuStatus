@@ -3,23 +3,34 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-VERSION="${1:-0.1.0}"
+VERSION="${1:-${RELEASE_VERSION:-0.1.0}}"
 APP_NAME="MenuStatus"
 DERIVED=".build"
-OUTPUT_DIR="dist"
+OUTPUT_DIR="${OUTPUT_DIR:-dist}"
+DMG_STAGING_DIR="$OUTPUT_DIR/dmg-root"
+DMG_PATH="$OUTPUT_DIR/$APP_NAME-$VERSION.dmg"
+USE_CREATE_DMG="${USE_CREATE_DMG:-0}"
+
+cleanup() {
+    rm -rf "$DMG_STAGING_DIR"
+}
+
+trap cleanup EXIT
 
 echo "==> Generating Xcode project..."
 TUIST_SKIP_UPDATE_CHECK=1 tuist generate --no-open
 
 echo "==> Building Release..."
-xcodebuild build \
-    -workspace "$APP_NAME.xcworkspace" \
+TUIST_SKIP_UPDATE_CHECK=1 tuist xcodebuild build \
     -scheme "$APP_NAME" \
     -configuration Release \
     -derivedDataPath "$DERIVED" \
     -quiet
 
-APP_PATH=$(find "$DERIVED" -name "$APP_NAME.app" -type d | head -1)
+APP_PATH="$DERIVED/Build/Products/Release/$APP_NAME.app"
+if [ ! -d "$APP_PATH" ]; then
+    APP_PATH=$(find "$DERIVED" -path "*/Build/Products/Release/$APP_NAME.app" -type d | head -1)
+fi
 if [ -z "$APP_PATH" ]; then
     echo "Error: $APP_NAME.app not found in $DERIVED"
     exit 1
@@ -32,14 +43,17 @@ mkdir -p "$OUTPUT_DIR"
 IDENTITY="${CODESIGN_IDENTITY:-}"
 if [ -n "$IDENTITY" ]; then
     echo "==> Signing with: $IDENTITY"
-    codesign --force --deep --sign "$IDENTITY" "$APP_PATH"
+    codesign --force --deep --options runtime --timestamp --sign "$IDENTITY" "$APP_PATH"
 fi
 
-# Create DMG if create-dmg is installed, otherwise fall back to ZIP
-if command -v create-dmg &>/dev/null; then
-    DMG_PATH="$OUTPUT_DIR/$APP_NAME-$VERSION.dmg"
-    rm -f "$DMG_PATH"
+# Stage a standard drag-to-Applications DMG payload.
+rm -rf "$DMG_STAGING_DIR"
+mkdir -p "$DMG_STAGING_DIR"
+cp -R "$APP_PATH" "$DMG_STAGING_DIR/"
+ln -s /Applications "$DMG_STAGING_DIR/Applications"
 
+rm -f "$DMG_PATH"
+if [ "$USE_CREATE_DMG" = "1" ] && command -v create-dmg &>/dev/null; then
     echo "==> Creating DMG..."
     create-dmg \
         --volname "$APP_NAME" \
@@ -50,27 +64,46 @@ if command -v create-dmg &>/dev/null; then
         --hide-extension "$APP_NAME.app" \
         --app-drop-link 450 190 \
         "$DMG_PATH" \
-        "$APP_PATH"
+        "$DMG_STAGING_DIR"
 
     echo "==> DMG created: $DMG_PATH"
 else
-    ZIP_PATH="$OUTPUT_DIR/$APP_NAME-$VERSION.zip"
-    echo "==> create-dmg not found, creating ZIP instead..."
-    echo "    Install with: brew install create-dmg"
-    ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
-    echo "==> ZIP created: $ZIP_PATH"
+    echo "==> Creating plain DMG with hdiutil..."
+    hdiutil create \
+        -volname "$APP_NAME" \
+        -srcfolder "$DMG_STAGING_DIR" \
+        -ov \
+        -format UDZO \
+        "$DMG_PATH"
+    echo "==> DMG created: $DMG_PATH"
 fi
 
 # Notarize if credentials are available (optional)
 NOTARIZE_PROFILE="${NOTARIZE_PROFILE:-}"
+APPLE_ID="${APPLE_ID:-}"
+APPLE_APP_SPECIFIC_PASSWORD="${APPLE_APP_SPECIFIC_PASSWORD:-}"
+APPLE_TEAM_ID="${APPLE_TEAM_ID:-}"
+
 if [ -n "$IDENTITY" ] && [ -n "$NOTARIZE_PROFILE" ]; then
-    ARTIFACT="$OUTPUT_DIR/$APP_NAME-$VERSION."*
     echo "==> Submitting for notarization..."
-    xcrun notarytool submit $ARTIFACT \
+    xcrun notarytool submit "$DMG_PATH" \
         --keychain-profile "$NOTARIZE_PROFILE" \
         --wait
-    xcrun stapler staple "$APP_PATH"
+    xcrun stapler staple "$DMG_PATH"
     echo "==> Notarization complete"
+elif [ -n "$IDENTITY" ] && [ -n "$APPLE_ID" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+    echo "==> Submitting for notarization..."
+    xcrun notarytool submit "$DMG_PATH" \
+        --apple-id "$APPLE_ID" \
+        --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+        --team-id "$APPLE_TEAM_ID" \
+        --wait
+    xcrun stapler staple "$DMG_PATH"
+    echo "==> Notarization complete"
+fi
+
+if [ -n "${GITHUB_OUTPUT:-}" ]; then
+    echo "artifact_path=$DMG_PATH" >> "$GITHUB_OUTPUT"
 fi
 
 echo "==> Done! Output in $OUTPUT_DIR/"
