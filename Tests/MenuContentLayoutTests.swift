@@ -30,4 +30,26 @@ final class MenuContentLayoutTests: XCTestCase {
         XCTAssertFalse(MenuContentLayout.needsScroll(measuredHeight: 300, maxVisibleContentHeight: 480))
         XCTAssertTrue(MenuContentLayout.needsScroll(measuredHeight: 700, maxVisibleContentHeight: 480))
     }
+
+    func testUnmeasuredContentUsesLastMeasuredHeightAsProvisionalFrame() {
+        XCTAssertEqual(
+            MenuContentLayout.provisionalScrollFrameHeight(
+                measuredHeight: nil,
+                lastMeasuredHeight: 280,
+                maxVisibleContentHeight: 480
+            ),
+            280
+        )
+    }
+
+    func testUnmeasuredContentFallsBackToDefaultProvisionalHeight() {
+        XCTAssertEqual(
+            MenuContentLayout.provisionalScrollFrameHeight(
+                measuredHeight: nil,
+                lastMeasuredHeight: nil,
+                maxVisibleContentHeight: 480
+            ),
+            320
+        )
+    }
 }

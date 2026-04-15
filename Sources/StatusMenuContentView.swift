@@ -4,6 +4,7 @@ import SwiftUI
 private enum MenuContentSizing {
     static let width: CGFloat = 360
     static let minScreenMargin: CGFloat = 140
+    static let provisionalContentHeight: CGFloat = 320
 }
 
 enum MenuContentLayout {
@@ -15,6 +16,26 @@ enum MenuContentLayout {
     static func scrollFrameHeight(measuredHeight: CGFloat?, maxVisibleContentHeight: CGFloat) -> CGFloat {
         guard let measuredHeight else { return maxVisibleContentHeight }
         return min(measuredHeight, maxVisibleContentHeight)
+    }
+
+    static func provisionalScrollFrameHeight(
+        measuredHeight: CGFloat?,
+        lastMeasuredHeight: CGFloat?,
+        maxVisibleContentHeight: CGFloat,
+        defaultContentHeight: CGFloat = MenuContentSizing.provisionalContentHeight
+    ) -> CGFloat {
+        if let measuredHeight {
+            return scrollFrameHeight(
+                measuredHeight: measuredHeight,
+                maxVisibleContentHeight: maxVisibleContentHeight
+            )
+        }
+
+        if let lastMeasuredHeight {
+            return min(lastMeasuredHeight, maxVisibleContentHeight)
+        }
+
+        return min(defaultContentHeight, maxVisibleContentHeight)
     }
 }
 
@@ -74,6 +95,7 @@ struct StatusMenuContentView: View {
     @State private var benchmarkHoverHeight: CGFloat = 0
     @State private var benchmarkHoverTask: Task<Void, Never>?
     @State private var initialMeasurementDone = false
+    @State private var lastMeasuredContentHeight: CGFloat?
     @State private var headerHeight: CGFloat = 0
     @State private var footerHeight: CGFloat = 0
     @State private var measuredMenuWidth: CGFloat = MenuContentSizing.width
@@ -119,8 +141,9 @@ struct StatusMenuContentView: View {
     }
 
     private var scrollFrameHeight: CGFloat {
-        MenuContentLayout.scrollFrameHeight(
+        MenuContentLayout.provisionalScrollFrameHeight(
             measuredHeight: activeContentHeight,
+            lastMeasuredHeight: lastMeasuredContentHeight,
             maxVisibleContentHeight: maxVisibleContentHeight
         )
     }
@@ -357,6 +380,7 @@ struct StatusMenuContentView: View {
                     Color.clear
                         .onChange(of: proxy.size.height, initial: true) { _, h in
                             contentHeights[activeSelection] = h
+                            lastMeasuredContentHeight = h
                             if !initialMeasurementDone { initialMeasurementDone = true }
                         }
                 }
