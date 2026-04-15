@@ -6,6 +6,18 @@ private enum MenuContentSizing {
     static let minScreenMargin: CGFloat = 140
 }
 
+enum MenuContentLayout {
+    static func needsScroll(measuredHeight: CGFloat?, maxVisibleContentHeight: CGFloat) -> Bool {
+        guard let measuredHeight else { return true }
+        return measuredHeight >= maxVisibleContentHeight
+    }
+
+    static func scrollFrameHeight(measuredHeight: CGFloat?, maxVisibleContentHeight: CGFloat) -> CGFloat {
+        guard let measuredHeight else { return maxVisibleContentHeight }
+        return min(measuredHeight, maxVisibleContentHeight)
+    }
+}
+
 enum MenuLayoutMetrics {
     static func tooltipOffsetX(
         dayX: CGFloat,
@@ -95,11 +107,22 @@ struct StatusMenuContentView: View {
         return max(200, screenHeight - MenuContentSizing.minScreenMargin)
     }
 
+    private var activeContentHeight: CGFloat? {
+        contentHeights[activeSelection]
+    }
+
+    private var needsScroll: Bool {
+        MenuContentLayout.needsScroll(
+            measuredHeight: activeContentHeight,
+            maxVisibleContentHeight: maxVisibleContentHeight
+        )
+    }
+
     private var scrollFrameHeight: CGFloat {
-        guard let measured = contentHeights[activeSelection] else {
-            return maxVisibleContentHeight
-        }
-        return min(measured, maxVisibleContentHeight)
+        MenuContentLayout.scrollFrameHeight(
+            measuredHeight: activeContentHeight,
+            maxVisibleContentHeight: maxVisibleContentHeight
+        )
     }
 
     private var activeErrorMessages: MenuErrorMessages {
@@ -162,11 +185,15 @@ struct StatusMenuContentView: View {
                 }
             }
 
-            ScrollView {
+            if needsScroll {
+                ScrollView {
+                    measuredContent
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .frame(height: scrollFrameHeight)
+            } else {
                 measuredContent
             }
-            .scrollBounceBehavior(.basedOnSize)
-            .frame(height: scrollFrameHeight)
 
             VStack(spacing: 0) {
                 Divider()

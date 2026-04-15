@@ -80,53 +80,6 @@ final class ProviderConfigStore {
         return html.contains("__next_f.push") ? .incidentIO : .atlassianStatuspage
     }
 
-    // MARK: - Import / Export
-
-    struct ExportFormat: Codable {
-        let providers: [ExportEntry]
-    }
-
-    struct ExportEntry: Codable {
-        let id: String?
-        let name: String
-        let url: String
-        let platform: StatusPlatform?
-    }
-
-    func exportJSON() throws -> Data {
-        let entries = providers.filter { !$0.isBuiltIn }.map {
-            ExportEntry(id: $0.id, name: $0.displayName, url: $0.baseURL.absoluteString, platform: $0.platform)
-        }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return try encoder.encode(ExportFormat(providers: entries))
-    }
-
-    func importJSON(_ data: Data) async throws -> [ProviderConfig] {
-        let decoded = try JSONDecoder().decode(ExportFormat.self, from: data)
-        var added: [ProviderConfig] = []
-
-        for entry in decoded.providers {
-            guard let url = URL(string: entry.url) else { continue }
-            let config: ProviderConfig
-            if let id = entry.id, let platform = entry.platform {
-                config = ProviderConfig(
-                    id: id, displayName: entry.name,
-                    baseURL: url, platform: platform, isBuiltIn: false
-                )
-            } else {
-                config = try await Self.detect(url: url)
-            }
-            if !providers.contains(where: { $0.id == config.id }) {
-                providers.append(config)
-                added.append(config)
-            }
-        }
-
-        if !added.isEmpty { saveToDisk() }
-        return added
-    }
-
     // MARK: - Persistence
 
     private func saveToDisk() {

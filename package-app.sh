@@ -3,14 +3,14 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-VERSION="${1:-${MENU_STATUS_VERSION:-${RELEASE_VERSION:-0.1.0}}}"
+VERSION="${1:-${MENU_STATUS_VERSION:-${RELEASE_VERSION:-0.0.0-dev}}}"
 APP_NAME="MenuStatus"
 DERIVED=".build"
 OUTPUT_DIR="${OUTPUT_DIR:-dist}"
 DMG_STAGING_DIR="$OUTPUT_DIR/dmg-root"
 DMG_PATH="$OUTPUT_DIR/$APP_NAME-$VERSION.dmg"
 USE_CREATE_DMG="${USE_CREATE_DMG:-0}"
-BUILD_NUMBER="${MENU_STATUS_BUILD:-1}"
+BUILD_NUMBER="${MENU_STATUS_BUILD:-0}"
 FEED_URL="${MENU_STATUS_FEED_URL:-}"
 PUBLIC_ED_KEY="${MENU_STATUS_PUBLIC_ED_KEY:-}"
 
@@ -18,12 +18,70 @@ export MENU_STATUS_VERSION="$VERSION"
 export MENU_STATUS_BUILD="$BUILD_NUMBER"
 export MENU_STATUS_FEED_URL="$FEED_URL"
 export MENU_STATUS_PUBLIC_ED_KEY="$PUBLIC_ED_KEY"
+export TUIST_APP_VERSION="$MENU_STATUS_VERSION"
+export TUIST_APP_BUILD="$MENU_STATUS_BUILD"
+export TUIST_APP_FEED_URL="$MENU_STATUS_FEED_URL"
+export TUIST_APP_PUBLIC_ED_KEY="$MENU_STATUS_PUBLIC_ED_KEY"
 
 cleanup() {
     rm -rf "$DMG_STAGING_DIR"
 }
 
 trap cleanup EXIT
+
+require_value() {
+    local name="$1"
+    local value="$2"
+    if [ -z "$value" ]; then
+        echo "Error: $name must be set for release packaging."
+        exit 1
+    fi
+}
+
+read_plist_value() {
+    local plist="$1"
+    local key="$2"
+    /usr/libexec/PlistBuddy -c "Print :$key" "$plist"
+}
+
+validate_release_metadata() {
+    local app_path="$1"
+    local plist="$app_path/Contents/Info.plist"
+    local actual_version
+    local actual_build
+    local actual_feed_url
+    local actual_public_key
+
+    actual_version="$(read_plist_value "$plist" CFBundleShortVersionString)"
+    actual_build="$(read_plist_value "$plist" CFBundleVersion)"
+    actual_feed_url="$(read_plist_value "$plist" SUFeedURL)"
+    actual_public_key="$(read_plist_value "$plist" SUPublicEDKey)"
+
+    if [ "$actual_version" != "$MENU_STATUS_VERSION" ]; then
+        echo "Error: CFBundleShortVersionString is '$actual_version' but expected '$MENU_STATUS_VERSION'."
+        exit 1
+    fi
+
+    if [ "$actual_build" != "$MENU_STATUS_BUILD" ]; then
+        echo "Error: CFBundleVersion is '$actual_build' but expected '$MENU_STATUS_BUILD'."
+        exit 1
+    fi
+
+    if [ "$actual_feed_url" != "$MENU_STATUS_FEED_URL" ]; then
+        echo "Error: SUFeedURL is '$actual_feed_url' but expected '$MENU_STATUS_FEED_URL'."
+        exit 1
+    fi
+
+    if [ "$actual_public_key" != "$MENU_STATUS_PUBLIC_ED_KEY" ]; then
+        echo "Error: SUPublicEDKey does not match the configured release key."
+        exit 1
+    fi
+}
+
+require_value "MENU_STATUS_VERSION" "$MENU_STATUS_VERSION"
+require_value "MENU_STATUS_BUILD" "$MENU_STATUS_BUILD"
+require_value "MENU_STATUS_FEED_URL" "$MENU_STATUS_FEED_URL"
+require_value "MENU_STATUS_PUBLIC_ED_KEY" "$MENU_STATUS_PUBLIC_ED_KEY"
 
 echo "==> Generating Xcode project..."
 TUIST_SKIP_UPDATE_CHECK=1 tuist generate --no-open
@@ -47,6 +105,8 @@ if [ -z "$APP_PATH" ]; then
 fi
 
 echo "==> Found app at $APP_PATH"
+echo "==> Validating release metadata..."
+validate_release_metadata "$APP_PATH"
 mkdir -p "$OUTPUT_DIR"
 
 # Sign if identity is available (optional)

@@ -1,11 +1,9 @@
-import Foundation
 import ProjectDescription
 
-let environment = ProcessInfo.processInfo.environment
-let marketingVersion = environment["MENU_STATUS_VERSION"] ?? "1.0"
-let currentProjectVersion = environment["MENU_STATUS_BUILD"] ?? "1"
-let feedURL = environment["MENU_STATUS_FEED_URL"] ?? ""
-let publicEDKey = environment["MENU_STATUS_PUBLIC_ED_KEY"] ?? ""
+let marketingVersion = Environment.appVersion.getString(default: "1.0")
+let currentProjectVersion = Environment.appBuild.getString(default: "1")
+let feedURL = Environment.appFeedUrl.getString(default: "")
+let publicEDKey = Environment.appPublicEdKey.getString(default: "")
 
 let project = Project(
     name: "MenuStatus",

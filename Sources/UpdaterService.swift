@@ -1,6 +1,29 @@
 import Foundation
 import Sparkle
 
+enum UpdaterAvailability: Equatable {
+    case available
+    case missingFeedURL
+    case missingPublicKey
+    case buildProducts
+    case notInstalledToApplications
+
+    var diagnosticMessage: String? {
+        switch self {
+        case .available:
+            nil
+        case .missingFeedURL:
+            "Missing SUFeedURL in this build, so MenuStatus cannot check for updates."
+        case .missingPublicKey:
+            "Missing SUPublicEDKey in this build, so MenuStatus cannot verify updates."
+        case .buildProducts:
+            "In-app updates are unavailable in local build products."
+        case .notInstalledToApplications:
+            "Install MenuStatus to /Applications to enable in-app updates."
+        }
+    }
+}
+
 struct UpdaterConfiguration: Equatable {
     let feedURLString: String
     let publicEDKey: String
@@ -21,18 +44,37 @@ struct UpdaterConfiguration: Equatable {
     }
 
     var isAvailable: Bool {
-        hasRequiredMetadata && isInstalledAppBundle
+        availability == .available
     }
 
-    private var hasRequiredMetadata: Bool {
-        !feedURLString.isEmpty && !publicEDKey.isEmpty
+    var availability: UpdaterAvailability {
+        if isBuildProductsBundle {
+            return .buildProducts
+        }
+        if !isInstalledToApplications {
+            return .notInstalledToApplications
+        }
+        if feedURLString.isEmpty {
+            return .missingFeedURL
+        }
+        if publicEDKey.isEmpty {
+            return .missingPublicKey
+        }
+        return .available
     }
 
-    private var isInstalledAppBundle: Bool {
-        let bundleURL = URL(fileURLWithPath: bundlePath)
-        guard bundleURL.pathExtension == "app" else { return false }
+    private var isInstalledToApplications: Bool {
+        guard isAppBundle else { return false }
+        let normalizedPath = URL(fileURLWithPath: bundlePath).standardizedFileURL.path
+        return normalizedPath.hasPrefix("/Applications/")
+    }
 
-        let normalizedPath = bundleURL.standardizedFileURL.path
+    private var isAppBundle: Bool {
+        URL(fileURLWithPath: bundlePath).pathExtension == "app"
+    }
+
+    private var isBuildProductsBundle: Bool {
+        let normalizedPath = URL(fileURLWithPath: bundlePath).standardizedFileURL.path
         let blockedSegments = [
             "/.build/",
             "/Derived/",
@@ -40,7 +82,7 @@ struct UpdaterConfiguration: Equatable {
             "/Build/Products/"
         ]
 
-        return blockedSegments.allSatisfy { !normalizedPath.contains($0) }
+        return blockedSegments.contains { normalizedPath.contains($0) }
     }
 }
 
@@ -48,12 +90,14 @@ struct UpdaterConfiguration: Equatable {
     private let configuration: UpdaterConfiguration
     private let updaterController: SPUStandardUpdaterController?
     private let updater: SPUUpdater?
+    private let startupErrorMessage: String?
 
     init(bundle: Bundle = .main) {
         self.configuration = UpdaterConfiguration(bundle: bundle)
         guard configuration.isAvailable else {
             self.updaterController = nil
             self.updater = nil
+            self.startupErrorMessage = nil
             return
         }
 
@@ -67,16 +111,36 @@ struct UpdaterConfiguration: Equatable {
 
         do {
             try controller.updater.start()
+            self.startupErrorMessage = nil
         } catch {
+            self.startupErrorMessage = "Sparkle failed to start in this build."
             print("Sparkle failed to start: \(error)")
         }
     }
 
+    var availability: UpdaterAvailability {
+        configuration.availability
+    }
+
+    var diagnosticMessage: String? {
+        if let startupErrorMessage {
+            return startupErrorMessage
+        }
+        if availability != .available {
+            return availability.diagnosticMessage
+        }
+        if !(updater?.canCheckForUpdates ?? false) {
+            return "Update checks are temporarily unavailable."
+        }
+        return nil
+    }
+
     var isAvailable: Bool {
-        configuration.isAvailable && updater != nil
+        availability == .available && updater != nil && startupErrorMessage == nil
     }
 
     func checkForUpdates() {
+        guard canCheckForUpdates else { return }
         updater?.checkForUpdates()
     }
 

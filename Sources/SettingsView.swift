@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 private struct LeadingTextField: NSViewRepresentable {
     @Binding var text: String
@@ -100,13 +99,6 @@ struct SettingsView: View {
                 .disabled(settings.removedBuiltInIDs.isEmpty)
             }
 
-            Section("Data") {
-                HStack {
-                    ExportButton(providerConfigs: settings.providerConfigs)
-                    ImportButton(providerConfigs: settings.providerConfigs, store: store)
-                }
-            }
-
             Section("Updates") {
                 Toggle("Check for updates automatically", isOn: Binding(
                     get: { updaterService.automaticallyChecksForUpdates },
@@ -125,8 +117,8 @@ struct SettingsView: View {
                 }
                 .disabled(!updaterService.isAvailable || !updaterService.canCheckForUpdates)
 
-                if !updaterService.isAvailable {
-                    Text("In-app updates are only available in configured release builds.")
+                if let diagnosticMessage = updaterService.diagnosticMessage {
+                    Text(diagnosticMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -255,62 +247,5 @@ private struct AddProviderRow: View {
         } catch {
             errorMessage = "Could not detect status page. Make sure it uses Statuspage or incident.io."
         }
-    }
-}
-
-// MARK: - Import / Export
-
-private struct ExportButton: View {
-    let providerConfigs: ProviderConfigStore
-    @State private var showExport = false
-
-    var body: some View {
-        Button("Export") { showExport = true }
-            .fileExporter(
-                isPresented: $showExport,
-                document: ProviderExportDocument(providerConfigs: providerConfigs),
-                contentType: .json,
-                defaultFilename: "menustatus-providers"
-            ) { _ in }
-    }
-}
-
-private struct ImportButton: View {
-    let providerConfigs: ProviderConfigStore
-    var store: StatusStore?
-    @State private var showImport = false
-    @State private var importResult: String?
-
-    var body: some View {
-        Button("Import") { showImport = true }
-            .fileImporter(isPresented: $showImport, allowedContentTypes: [.json]) { result in
-                guard case .success(let url) = result,
-                      let data = try? Data(contentsOf: url) else { return }
-                Task {
-                    let added = try await providerConfigs.importJSON(data)
-                    importResult = "Added \(added.count) provider(s)"
-                    if !added.isEmpty, let store {
-                        await store.refreshNow()
-                    }
-                }
-            }
-    }
-}
-
-struct ProviderExportDocument: FileDocument {
-    static var readableContentTypes: [UTType] { [.json] }
-    let data: Data
-
-    @MainActor
-    init(providerConfigs: ProviderConfigStore) {
-        self.data = (try? providerConfigs.exportJSON()) ?? Data()
-    }
-
-    init(configuration: ReadConfiguration) throws {
-        self.data = configuration.file.regularFileContents ?? Data()
-    }
-
-    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        FileWrapper(regularFileWithContents: data)
     }
 }

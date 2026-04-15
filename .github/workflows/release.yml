@@ -39,6 +39,18 @@ jobs:
             exit 1
           fi
 
+      - name: Validate release metadata inputs
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ -z "$VERSION" ]; then
+            echo "Release version could not be derived from tag ${GITHUB_REF_NAME}."
+            exit 1
+          fi
+          if [ -z "${GITHUB_RUN_NUMBER}" ]; then
+            echo "GITHUB_RUN_NUMBER must be available for release builds."
+            exit 1
+          fi
+
       - name: Import Apple signing certificate
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
