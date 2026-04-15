@@ -7,6 +7,7 @@ import ProjectDescription
 let packageSettings = PackageSettings(
     productTypes: [
         "Sparkle": .framework,
+        "MenuBarExtraAccess": .framework,
     ]
 )
 #endif

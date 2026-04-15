@@ -30,7 +30,8 @@ TUIST_SKIP_UPDATE_CHECK=1 tuist generate --no-open
 
 echo "==> Building Release..."
 echo "    Version: $MENU_STATUS_VERSION ($MENU_STATUS_BUILD)"
-TUIST_SKIP_UPDATE_CHECK=1 tuist xcodebuild build \
+xcodebuild build \
+    -workspace MenuStatus.xcworkspace \
     -scheme "$APP_NAME" \
     -configuration Release \
     -derivedDataPath "$DERIVED" \
