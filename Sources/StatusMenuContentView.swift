@@ -14,6 +14,12 @@ enum MenuTabMetrics {
 enum MenuTabGridLayout {
     static let columns = 3
     static let spacing: CGFloat = 4
+    static let providerHorizontalPadding: CGFloat = 10
+
+    static func columnWidth(forAvailableWidth availableWidth: CGFloat) -> CGFloat {
+        guard availableWidth > 0 else { return 0 }
+        return (availableWidth - spacing * CGFloat(columns - 1)) / CGFloat(columns)
+    }
 
     static func rowCount(for itemCount: Int) -> Int {
         guard itemCount > 0 else { return 0 }
@@ -322,7 +328,7 @@ struct StatusMenuContentView: View {
                         selection = .benchmark
                     }
                 )
-                .padding(.horizontal, 10)
+                .padding(.horizontal, MenuTabGridLayout.providerHorizontalPadding)
                 .padding(.top, 10)
                 .padding(.bottom, 6)
 
@@ -784,6 +790,10 @@ private struct ProviderTabGrid: View {
     let onSelectProvider: (ProviderConfig) -> Void
     let onSelectBenchmark: () -> Void
 
+    private let columnWidth = MenuTabGridLayout.columnWidth(
+        forAvailableWidth: MenuContentSizing.width - MenuTabGridLayout.providerHorizontalPadding * 2
+    )
+
     var body: some View {
         Grid(
             horizontalSpacing: MenuTabGridLayout.spacing,
@@ -802,8 +812,10 @@ private struct ProviderTabGrid: View {
                             ) {
                                 onSelectProvider(provider)
                             }
+                            .frame(width: columnWidth, alignment: .leading)
                         } else {
                             MenuGridPlaceholderCell()
+                                .frame(width: columnWidth)
                         }
                     }
                 }
@@ -818,8 +830,11 @@ private struct ProviderTabGrid: View {
                     isSelected: activeSelection == .benchmark,
                     action: onSelectBenchmark
                 )
+                .frame(width: columnWidth, alignment: .leading)
                 MenuGridPlaceholderCell()
+                    .frame(width: columnWidth)
                 MenuGridPlaceholderCell()
+                    .frame(width: columnWidth)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

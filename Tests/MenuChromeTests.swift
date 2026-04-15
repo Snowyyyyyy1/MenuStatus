@@ -11,6 +11,18 @@ final class MenuChromeTests: XCTestCase {
         XCTAssertEqual(MenuTabGridLayout.rowCount(for: 7), 3)
     }
 
+    func testTabGridColumnWidthUsesThreeFixedSlotsAcrossProviderHeader() {
+        let availableWidth = MenuContentSizing.width - MenuTabGridLayout.providerHorizontalPadding * 2
+        let columnWidth = MenuTabGridLayout.columnWidth(forAvailableWidth: availableWidth)
+
+        XCTAssertEqual(
+            columnWidth * CGFloat(MenuTabGridLayout.columns)
+                + MenuTabGridLayout.spacing * CGFloat(MenuTabGridLayout.columns - 1),
+            availableWidth,
+            accuracy: 0.001
+        )
+    }
+
     @MainActor
     func testAppDoesNotTerminateAfterLastWindowClosed() {
         let delegate = MenuStatusAppDelegate()
