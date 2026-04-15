@@ -26,6 +26,9 @@ jobs:
       - name: Install Tuist
         run: brew install tuist
 
+      - name: Install Tuist dependencies
+        run: TUIST_SKIP_UPDATE_CHECK=1 tuist install
+
       - name: Validate Sparkle secrets
         env:
           SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
