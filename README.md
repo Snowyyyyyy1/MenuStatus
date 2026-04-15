@@ -44,18 +44,16 @@ This gives the app a second primary workflow alongside service-status tracking: 
 
 ## Screenshots
 
-### Status Pages
-
 <p align="center">
-  <img src="docs/assets/readme/status-openai.png" width="48%" alt="OpenAI incident.io status page view with grouped uptime bars">
-  <img src="docs/assets/readme/status-1password.png" width="48%" alt="1Password Atlassian Statuspage view with active incident and grouped uptime bars">
+  <img src="docs/assets/readme/gallery/01-status-1password.png" width="32%" alt="1Password status page overview">
+  <img src="docs/assets/readme/gallery/02-status-1password-hover.png" width="32%" alt="1Password status page hover details">
+  <img src="docs/assets/readme/gallery/03-status-claude.png" width="32%" alt="Claude status page overview">
 </p>
 
-### AI Stupid Level
-
 <p align="center">
-  <img src="docs/assets/readme/hero-benchmark.png" width="48%" alt="AI Stupid Level benchmark view showing global index, model ranking, vendor comparison, and recommendations">
-  <img src="docs/assets/readme/benchmark-hover.png" width="48%" alt="AI Stupid Level benchmark view showing a hover card with model metrics">
+  <img src="docs/assets/readme/gallery/04-benchmark-ranking.png" width="32%" alt="AI Stupid Level benchmark ranking overview">
+  <img src="docs/assets/readme/gallery/05-benchmark-panels.png" width="32%" alt="AI Stupid Level vendor comparison and recommendations panels">
+  <img src="docs/assets/readme/gallery/06-benchmark-hover.png" width="32%" alt="AI Stupid Level hover card details">
 </p>
 
 ## Download
