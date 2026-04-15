@@ -3,7 +3,8 @@ set -euo pipefail
 
 # Generate Sparkle EdDSA key pair (one-time setup).
 # Private key is stored in macOS Keychain.
-# Public key is printed — copy it into Project.swift SUPublicEDKey.
+# Public key is printed — copy it into the SPARKLE_PUBLIC_ED_KEY GitHub secret
+# and MENU_STATUS_PUBLIC_ED_KEY environment variable for release packaging.
 
 cd "$(dirname "$0")/.."
 
@@ -21,5 +22,6 @@ echo ""
 "$SPARKLE_BIN/generate_keys"
 
 echo ""
-echo "==> Done! Copy the public key above into Project.swift:"
-echo '    "SUPublicEDKey": .string("YOUR_PUBLIC_KEY_HERE")'
+echo "==> Done! Save the public key above in your release configuration:"
+echo "    GitHub secret: SPARKLE_PUBLIC_ED_KEY"
+echo "    Local env var: MENU_STATUS_PUBLIC_ED_KEY"

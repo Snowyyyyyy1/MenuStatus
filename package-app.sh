@@ -3,13 +3,21 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-VERSION="${1:-${RELEASE_VERSION:-0.1.0}}"
+VERSION="${1:-${MENU_STATUS_VERSION:-${RELEASE_VERSION:-0.1.0}}}"
 APP_NAME="MenuStatus"
 DERIVED=".build"
 OUTPUT_DIR="${OUTPUT_DIR:-dist}"
 DMG_STAGING_DIR="$OUTPUT_DIR/dmg-root"
 DMG_PATH="$OUTPUT_DIR/$APP_NAME-$VERSION.dmg"
 USE_CREATE_DMG="${USE_CREATE_DMG:-0}"
+BUILD_NUMBER="${MENU_STATUS_BUILD:-1}"
+FEED_URL="${MENU_STATUS_FEED_URL:-}"
+PUBLIC_ED_KEY="${MENU_STATUS_PUBLIC_ED_KEY:-}"
+
+export MENU_STATUS_VERSION="$VERSION"
+export MENU_STATUS_BUILD="$BUILD_NUMBER"
+export MENU_STATUS_FEED_URL="$FEED_URL"
+export MENU_STATUS_PUBLIC_ED_KEY="$PUBLIC_ED_KEY"
 
 cleanup() {
     rm -rf "$DMG_STAGING_DIR"
@@ -21,6 +29,7 @@ echo "==> Generating Xcode project..."
 TUIST_SKIP_UPDATE_CHECK=1 tuist generate --no-open
 
 echo "==> Building Release..."
+echo "    Version: $MENU_STATUS_VERSION ($MENU_STATUS_BUILD)"
 TUIST_SKIP_UPDATE_CHECK=1 tuist xcodebuild build \
     -scheme "$APP_NAME" \
     -configuration Release \
@@ -104,6 +113,9 @@ fi
 
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
     echo "artifact_path=$DMG_PATH" >> "$GITHUB_OUTPUT"
+    echo "artifact_name=$(basename "$DMG_PATH")" >> "$GITHUB_OUTPUT"
+    echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+    echo "build_number=$BUILD_NUMBER" >> "$GITHUB_OUTPUT"
 fi
 
 echo "==> Done! Output in $OUTPUT_DIR/"

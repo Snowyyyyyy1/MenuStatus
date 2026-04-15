@@ -9,10 +9,6 @@ MenuStatus has two primary views:
 
 [Download Latest DMG](https://github.com/Snowyyyyyy1/MenuStatus/releases/latest) · [Release Notes](https://github.com/Snowyyyyyy1/MenuStatus/releases) · [Build From Source](#build-from-source)
 
-<p align="center">
-  <img src="docs/assets/readme/hero-benchmark.png" width="360" alt="MenuStatus benchmark view showing global index, model ranking, vendor comparison, and recommendations">
-</p>
-
 ## Two Primary Views
 
 ### Supported Status Pages
@@ -48,19 +44,26 @@ This gives the app a second primary workflow alongside service-status tracking: 
 
 ## Screenshots
 
-| Benchmark / AI Stupid Level | incident.io Status Pages |
-| --- | --- |
-| ![Benchmark view](docs/assets/readme/hero-benchmark.png) | ![OpenAI status view](docs/assets/readme/status-openai.png) |
+### Status Pages
 
-| Atlassian Statuspage |
-| --- |
-| ![1Password status view](docs/assets/readme/status-1password.png) |
+<p align="center">
+  <img src="docs/assets/readme/status-openai.png" width="48%" alt="OpenAI incident.io status page view with grouped uptime bars">
+  <img src="docs/assets/readme/status-1password.png" width="48%" alt="1Password Atlassian Statuspage view with active incident and grouped uptime bars">
+</p>
+
+### AI Stupid Level
+
+<p align="center">
+  <img src="docs/assets/readme/hero-benchmark.png" width="48%" alt="AI Stupid Level benchmark view showing global index, model ranking, vendor comparison, and recommendations">
+  <img src="docs/assets/readme/benchmark-hover.png" width="48%" alt="AI Stupid Level benchmark view showing a hover card with model metrics">
+</p>
 
 ## Download
 
 - Latest builds are published on [GitHub Releases](https://github.com/Snowyyyyyy1/MenuStatus/releases/latest)
 - Requires **macOS 14.0+**
 - The repository includes a GitHub Actions workflow that builds a Release `.app`, packages it as a `.dmg`, and uploads it to Releases
+- Signed release builds can check GitHub Pages for `appcast.xml` and install updates in-app via Sparkle
 
 If Apple signing and notarization secrets are not configured yet, the workflow can still publish an unsigned `.dmg` so the release path remains testable end to end.
 
@@ -119,7 +122,7 @@ TUIST_SKIP_UPDATE_CHECK=1 tuist xcodebuild test \
 
 ### Publish A DMG Release
 
-Push a version tag and GitHub Actions will build a Release `.app`, package it as a `.dmg`, and upload it to GitHub Releases:
+Push a version tag and GitHub Actions will build a Release `.app`, package it as a `.dmg`, upload it to GitHub Releases, and publish `appcast.xml` to GitHub Pages:
 
 ```bash
 git tag v0.1.0
@@ -130,7 +133,31 @@ The workflow is defined in `.github/workflows/release.yml` and uses [`package-ap
 
 By default the script uses `hdiutil` so it works reliably in CI. If you want a styled Finder layout locally and already have [`create-dmg`](https://github.com/create-dmg/create-dmg) installed, run `USE_CREATE_DMG=1 ./package-app.sh 0.1.0`.
 
-Optional GitHub repository secrets for signed/notarized builds:
+One-time Sparkle setup:
+
+```bash
+./Scripts/setup-sparkle-keys.sh
+```
+
+Required GitHub repository secrets for DMG-only in-app updates:
+
+- `SPARKLE_PUBLIC_ED_KEY`: Public Ed25519 key embedded in release builds
+- `SPARKLE_PRIVATE_ED_KEY`: Private Ed25519 key used in CI to sign the DMG and generate `appcast.xml`
+
+GitHub Pages must be enabled for this repository. The workflow publishes the update feed to:
+
+```text
+https://<owner>.github.io/<repo>/appcast.xml
+```
+
+The release build injects these values during `tuist generate`:
+
+- `MENU_STATUS_VERSION`
+- `MENU_STATUS_BUILD`
+- `MENU_STATUS_FEED_URL`
+- `MENU_STATUS_PUBLIC_ED_KEY`
+
+Recommended GitHub repository secrets for signed/notarized builds:
 
 - `APPLE_CERTIFICATE_P12_BASE64`: Base64-encoded Developer ID Application certificate (`.p12`)
 - `APPLE_CERTIFICATE_PASSWORD`: Password for the `.p12`
@@ -138,6 +165,8 @@ Optional GitHub repository secrets for signed/notarized builds:
 - `APPLE_ID`: Apple ID email used for notarization
 - `APPLE_APP_SPECIFIC_PASSWORD`: App-specific password for that Apple ID
 - `APPLE_TEAM_ID`: Apple Developer team ID
+
+If the Apple signing secrets are omitted, the workflow still publishes a DMG and appcast, but signed/notarized releases are the intended production setup.
 
 ## Architecture
 

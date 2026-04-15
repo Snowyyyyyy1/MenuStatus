@@ -112,11 +112,24 @@ struct SettingsView: View {
                     get: { updaterService.automaticallyChecksForUpdates },
                     set: { updaterService.automaticallyChecksForUpdates = $0 }
                 ))
+                .disabled(!updaterService.isAvailable)
+
+                Toggle("Download and install updates automatically", isOn: Binding(
+                    get: { updaterService.automaticallyDownloadsUpdates },
+                    set: { updaterService.automaticallyDownloadsUpdates = $0 }
+                ))
+                .disabled(!updaterService.isAvailable)
 
                 Button("Check for Updates...") {
                     updaterService.checkForUpdates()
                 }
-                .disabled(!updaterService.canCheckForUpdates)
+                .disabled(!updaterService.isAvailable || !updaterService.canCheckForUpdates)
+
+                if !updaterService.isAvailable {
+                    Text("In-app updates are only available in configured release builds.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section("About") {

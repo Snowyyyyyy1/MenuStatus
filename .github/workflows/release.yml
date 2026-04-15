@@ -1,4 +1,4 @@
-name: Release DMG
+name: Release DMG + Appcast
 
 on:
   push:
@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 jobs:
   release:
@@ -18,8 +20,21 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
       - name: Install Tuist
         run: brew install tuist
+
+      - name: Validate Sparkle secrets
+        env:
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+          SPARKLE_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+        run: |
+          if [ -z "$SPARKLE_PRIVATE_ED_KEY" ] || [ -z "$SPARKLE_PUBLIC_ED_KEY" ]; then
+            echo "SPARKLE_PRIVATE_ED_KEY and SPARKLE_PUBLIC_ED_KEY must be configured."
+            exit 1
+          fi
 
       - name: Import Apple signing certificate
         if: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' }}
@@ -48,7 +63,11 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: ./package-app.sh "${GITHUB_REF_NAME#v}"
+          MENU_STATUS_BUILD: ${{ github.run_number }}
+          MENU_STATUS_FEED_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/appcast.xml
+          MENU_STATUS_PUBLIC_ED_KEY: ${{ secrets.SPARKLE_PUBLIC_ED_KEY }}
+        run: |
+          ./package-app.sh "${GITHUB_REF_NAME#v}"
 
       - name: Upload GitHub release asset
         uses: softprops/action-gh-release@v2
@@ -56,3 +75,43 @@ jobs:
           files: ${{ steps.package.outputs.artifact_path }}
           generate_release_notes: true
           fail_on_unmatched_files: true
+
+      - name: Generate appcast.xml
+        env:
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARTIFACT_PATH="${{ steps.package.outputs.artifact_path }}"
+          ARTIFACT_NAME="${{ steps.package.outputs.artifact_name }}"
+          SPARKLE_BIN="Tuist/.build/artifacts/sparkle/Sparkle/bin"
+          APPCAST_WORK_DIR="$RUNNER_TEMP/appcast"
+          PAGES_DIR="$RUNNER_TEMP/pages"
+          DOWNLOAD_PREFIX="https://github.com/${GITHUB_REPOSITORY}/releases/download/v$VERSION/"
+
+          mkdir -p "$APPCAST_WORK_DIR" "$PAGES_DIR"
+          cp "$ARTIFACT_PATH" "$APPCAST_WORK_DIR/$ARTIFACT_NAME"
+
+          echo "$SPARKLE_PRIVATE_ED_KEY" | "$SPARKLE_BIN/sign_update" --ed-key-file - "$APPCAST_WORK_DIR/$ARTIFACT_NAME" >/dev/null
+          echo "$SPARKLE_PRIVATE_ED_KEY" | "$SPARKLE_BIN/generate_appcast" \
+            --ed-key-file - \
+            --download-url-prefix "$DOWNLOAD_PREFIX" \
+            "$APPCAST_WORK_DIR"
+
+          cp "$APPCAST_WORK_DIR/appcast.xml" "$PAGES_DIR/appcast.xml"
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/pages
+
+  deploy-appcast:
+    needs: release
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
