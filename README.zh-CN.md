@@ -18,8 +18,8 @@
 
 MenuStatus 主要有两个视图：
 
-- **状态页视图**：解析基于 **Atlassian Statuspage** 和 **incident.io** 的公开状态页
-- **AI Stupid Level 视图**：查看 global index、模型排行、厂商对比、recommendations、alerts 和 degradations
+- **状态页视图**：解析基于 **[Atlassian Statuspage](https://www.atlassian.com/software/statuspage)** 和 **[incident.io](https://incident.io/status-pages)** 的公开状态页
+- **[AI Stupid Level](https://www.aistupidlevel.info/) 视图**：查看 global index、模型排行、厂商对比、recommendations、alerts 和 degradations
 
 <p align="center">
   <a href="https://github.com/Snowyyyyyy1/MenuStatus/releases/latest">下载最新 DMG</a> ·
@@ -47,8 +47,8 @@ MenuStatus 主要有两个视图：
 
 MenuStatus 不是一个可以解析任意网站的通用状态监控器。目前只支持两种状态页平台：
 
-- **Atlassian Statuspage**
-- **incident.io**
+- **[Atlassian Statuspage](https://www.atlassian.com/software/statuspage)**
+- **[incident.io](https://incident.io/status-pages)**
 
 内置 provider 包括 **OpenAI** 和 **Anthropic**。你也可以添加其他兼容的状态页 URL，例如 GitHub、Cloudflare、1Password、Proton 等，只要它们使用的是这两种格式。
 
@@ -61,7 +61,7 @@ MenuStatus 不是一个可以解析任意网站的通用状态监控器。目前
 
 ### AI Stupid Level 视图
 
-MenuStatus 也内置了一个 **AI Stupid Level** 视图，用于查看来自 `aistupidlevel.info` 的 AI 基准快照。
+MenuStatus 也内置了一个 **[AI Stupid Level](https://www.aistupidlevel.info/)** 视图，用于查看来自 [`aistupidlevel.info`](https://www.aistupidlevel.info/) 的 AI 基准快照。
 
 它会展示：
 

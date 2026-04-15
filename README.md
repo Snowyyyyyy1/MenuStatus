@@ -18,8 +18,8 @@ A native macOS menu bar app for two supported kinds of public status pages, plus
 
 MenuStatus has two primary views:
 
-- **Supported Status Pages**: parse public status pages built on **Atlassian Statuspage** and **incident.io**
-- **AI Stupid Level**: check benchmark snapshots including global index, model ranking, vendor comparison, recommendations, alerts, and degradations
+- **Supported Status Pages**: parse public status pages built on **[Atlassian Statuspage](https://www.atlassian.com/software/statuspage)** and **[incident.io](https://incident.io/status-pages)**
+- **[AI Stupid Level](https://www.aistupidlevel.info/)**: check benchmark snapshots including global index, model ranking, vendor comparison, recommendations, alerts, and degradations
 
 <p align="center">
   <a href="https://github.com/Snowyyyyyy1/MenuStatus/releases/latest">Download Latest DMG</a> ·
@@ -47,8 +47,8 @@ MenuStatus has two primary views:
 
 MenuStatus is not a generic parser for arbitrary status sites. It currently supports two status-page platforms only:
 
-- **Atlassian Statuspage**
-- **incident.io**
+- **[Atlassian Statuspage](https://www.atlassian.com/software/statuspage)**
+- **[incident.io](https://incident.io/status-pages)**
 
 Built-in providers include **OpenAI** and **Anthropic**. You can also add compatible URLs from services built on those same two formats, such as GitHub, Cloudflare, 1Password, Proton, and similar providers.
 
@@ -61,7 +61,7 @@ From the menu bar you can:
 
 ### AI Stupid Level
 
-MenuStatus also includes an **AI Stupid Level** view for quick benchmark snapshots from `aistupidlevel.info`.
+MenuStatus also includes an **[AI Stupid Level](https://www.aistupidlevel.info/)** view for quick benchmark snapshots from [`aistupidlevel.info`](https://www.aistupidlevel.info/).
 
 It surfaces:
 
