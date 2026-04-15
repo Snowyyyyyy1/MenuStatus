@@ -100,46 +100,31 @@ struct GroupHeaderView: View {
     let store: StatusStore
     let dayDetails: [Date: [DayIncidentDetail]]
 
-    @State private var isHovered = false
-
     var body: some View {
-        Button {
-            store.toggleExpansion(for: section, provider: provider)
-        } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .center, spacing: 8) {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(isHovered ? .primary : .tertiary)
-                        .scaleEffect(isHovered ? 1.2 : 1.0)
-                        .animation(.easeInOut(duration: 0.15), value: isHovered)
+        MenuCollapsibleHeader(
+            isExpanded: isExpanded,
+            verticalPadding: 10,
+            action: { store.toggleExpansion(for: section, provider: provider) }
+        ) {
+            HStack(alignment: .center, spacing: 8) {
+                Text(section.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
 
-                    Text(section.title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.primary)
+                Text("\(section.componentCount) component\(section.componentCount == 1 ? "" : "s")")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
 
-                    Text("\(section.componentCount) component\(section.componentCount == 1 ? "" : "s")")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
+                Spacer()
 
-                    Spacer()
-
-                    Text(section.status.displayName)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(section.status.color)
-                }
-
-                if let timeline = section.timeline {
-                    UptimeBarWithLabels(timeline: timeline, dayDetails: dayDetails)
-                }
+                Text(section.status.displayName)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(section.status.color)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering in
-            isHovered = hovering
+        } belowContent: {
+            if let timeline = section.timeline {
+                UptimeBarWithLabels(timeline: timeline, dayDetails: dayDetails)
+            }
         }
     }
 }
@@ -379,7 +364,8 @@ struct IncidentRow: View {
                 Text(latestUpdate.body)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, 16)
             }
         }

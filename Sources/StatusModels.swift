@@ -86,14 +86,16 @@ extension ProviderConfig {
         matchingBenchmarkVendor vendor: String,
         in providers: [ProviderConfig]
     ) -> ProviderConfig? {
-        let canonicalDisplayName = BenchmarkVendorPresentation.displayName(for: vendor)
+        let normalizedVendor = BenchmarkVendorPresentation.normalizedID(for: vendor)
+        guard !normalizedVendor.isEmpty else { return nil }
+        let canonicalDisplayName = BenchmarkVendorPresentation.displayName(for: normalizedVendor)
 
         return providers.first {
-            $0.aiStupidLevelVendor?.caseInsensitiveCompare(vendor) == .orderedSame
+            BenchmarkVendorPresentation.matches($0.aiStupidLevelVendor, normalizedVendor)
         } ?? providers.first {
-            $0.id.caseInsensitiveCompare(vendor) == .orderedSame
-                || $0.displayName.caseInsensitiveCompare(canonicalDisplayName) == .orderedSame
-                || $0.displayName.caseInsensitiveCompare(vendor) == .orderedSame
+            BenchmarkVendorPresentation.matches($0.id, normalizedVendor)
+                || BenchmarkVendorPresentation.matches($0.displayName, canonicalDisplayName)
+                || BenchmarkVendorPresentation.matches($0.displayName, normalizedVendor)
         }
     }
 }

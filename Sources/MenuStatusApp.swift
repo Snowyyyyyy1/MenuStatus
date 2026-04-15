@@ -1,13 +1,13 @@
 import AppKit
-import MenuBarExtraAccess
 import SwiftUI
 
 @main
 struct MenuStatusApp: App {
+    @NSApplicationDelegateAdaptor(MenuStatusAppDelegate.self) private var appDelegate
     @State private var settings: SettingsStore
     @State private var store: StatusStore
     @State private var benchmarkStore: AIStupidLevelStore
-    @State private var isMenuPresented: Bool = false
+    @State private var settingsWindowPresenter = SettingsWindowPresenter()
     @State private var updaterService = UpdaterService()
 
     init() {
@@ -24,59 +24,57 @@ struct MenuStatusApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra {
-            StatusMenuContentView(store: store, benchmarkStore: benchmarkStore)
-                .introspectMenuBarExtraWindow { window in
-                    window.animationBehavior = .utilityWindow
-                }
-        } label: {
-            MenuBarIcon(indicator: store.overallIndicator, style: settings.iconStyle)
-        }
-        .menuBarExtraAccess(isPresented: $isMenuPresented)
-        .menuBarExtraStyle(.window)
+        let _ = configureStatusItemHost()
 
-        Window("Settings", id: "settings") {
+        Settings {
             SettingsView(settings: settings, store: store, updaterService: updaterService)
         }
         .windowResizability(.contentSize)
-        .defaultPosition(.center)
+    }
+
+    @MainActor
+    private func configureStatusItemHost() {
+        appDelegate.configure(
+            store: store,
+            benchmarkStore: benchmarkStore,
+            indicator: store.overallIndicator,
+            iconStyle: settings.iconStyle,
+            openSettings: {
+                settingsWindowPresenter.show {
+                    SettingsView(settings: settings, store: store, updaterService: updaterService)
+                }
+            }
+        )
     }
 }
 
-private struct MenuBarIcon: View {
-    let indicator: StatusIndicator
-    let style: MenuBarIconStyle
-
+enum MenuBarIconRenderer {
     private nonisolated(unsafe) static var cache: (indicator: StatusIndicator, style: MenuBarIconStyle, image: NSImage)?
 
-    var body: some View {
-        Image(nsImage: cachedImage())
-    }
-
-    private func cachedImage() -> NSImage {
+    static func image(indicator: StatusIndicator, style: MenuBarIconStyle) -> NSImage {
         if let c = Self.cache, c.indicator == indicator, c.style == style {
             return c.image
         }
-        let image = buildImage()
+        let image = buildImage(indicator: indicator, style: style)
         Self.cache = (indicator, style, image)
         return image
     }
 
-    private func buildImage() -> NSImage {
+    private static func buildImage(indicator: StatusIndicator, style: MenuBarIconStyle) -> NSImage {
         let sizeConfig = NSImage.SymbolConfiguration(pointSize: 16, weight: .regular)
 
         switch style {
         case .outline:
-            return buildOutline(sizeConfig: sizeConfig)
+            return buildOutline(indicator: indicator, sizeConfig: sizeConfig)
         case .filled:
-            return buildFilledCutout(sizeConfig: sizeConfig)
+            return buildFilledCutout(indicator: indicator, sizeConfig: sizeConfig)
         case .tinted:
-            return buildTinted(sizeConfig: sizeConfig)
+            return buildTinted(indicator: indicator, sizeConfig: sizeConfig)
         }
     }
 
     // Outline: template when operational, colored outline otherwise
-    private func buildOutline(sizeConfig: NSImage.SymbolConfiguration) -> NSImage {
+    private static func buildOutline(indicator: StatusIndicator, sizeConfig: NSImage.SymbolConfiguration) -> NSImage {
         let symbol = indicator.menuBarSymbol
         if indicator == .none {
             let image = NSImage(systemSymbolName: symbol, accessibilityDescription: indicator.displayName)?
@@ -92,7 +90,7 @@ private struct MenuBarIcon: View {
     }
 
     // Filled cutout: solid background shape with transparent foreground symbol
-    private func buildFilledCutout(sizeConfig: NSImage.SymbolConfiguration) -> NSImage {
+    private static func buildFilledCutout(indicator: StatusIndicator, sizeConfig: NSImage.SymbolConfiguration) -> NSImage {
         let symbol = indicator.sfSymbol
         let baseColor = NSColor(indicator.color)
 
@@ -117,7 +115,7 @@ private struct MenuBarIcon: View {
     }
 
     // Tinted: colored foreground symbol on dim colored background
-    private func buildTinted(sizeConfig: NSImage.SymbolConfiguration) -> NSImage {
+    private static func buildTinted(indicator: StatusIndicator, sizeConfig: NSImage.SymbolConfiguration) -> NSImage {
         let symbol = indicator.sfSymbol
         let baseColor = NSColor(indicator.color)
         let config = NSImage.SymbolConfiguration(hierarchicalColor: baseColor).applying(sizeConfig)

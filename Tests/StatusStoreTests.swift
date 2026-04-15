@@ -42,6 +42,10 @@ final class StatusStoreTests: XCTestCase {
             ProviderConfig.provider(matchingBenchmarkVendor: "deepseek", in: [.anthropic, deepSeek])?.id,
             deepSeek.id
         )
+        XCTAssertEqual(
+            ProviderConfig.provider(matchingBenchmarkVendor: "  OPENAI\n", in: [.anthropic, .openAI])?.id,
+            ProviderConfig.openAI.id
+        )
         XCTAssertNil(
             ProviderConfig.provider(matchingBenchmarkVendor: "xai", in: [.anthropic, .openAI])
         )

@@ -1,13 +1,69 @@
 import AppKit
 import SwiftUI
 
-private enum MenuContentSizing {
+enum MenuContentSizing {
     static let width: CGFloat = 360
     static let minScreenMargin: CGFloat = 140
     static let provisionalContentHeight: CGFloat = 320
 }
 
+enum MenuTabMetrics {
+    static let minHeight: CGFloat = 30
+}
+
+enum MenuTabGridLayout {
+    static let columns = 3
+    static let spacing: CGFloat = 4
+
+    static func rowCount(for itemCount: Int) -> Int {
+        guard itemCount > 0 else { return 0 }
+        return (itemCount + columns - 1) / columns
+    }
+}
+
 enum MenuContentLayout {
+    static func fallbackMeasuredHeight(
+        lastMeasuredHeight: CGFloat?,
+        usesLastMeasuredFallback: Bool
+    ) -> CGFloat? {
+        usesLastMeasuredFallback ? lastMeasuredHeight : nil
+    }
+
+    static func maxVisibleContentHeight(
+        availablePopoverHeight: CGFloat?,
+        fallbackScreenHeight: CGFloat,
+        headerHeight: CGFloat,
+        footerHeight: CGFloat,
+        minimumContentHeight: CGFloat = 200,
+        fallbackScreenMargin: CGFloat = MenuContentSizing.minScreenMargin,
+        fallbackPopoverPadding: CGFloat = 20
+    ) -> CGFloat {
+        if let availablePopoverHeight {
+            return max(minimumContentHeight, availablePopoverHeight - headerHeight - footerHeight)
+        }
+
+        if headerHeight > 0, footerHeight > 0 {
+            return max(
+                minimumContentHeight,
+                fallbackScreenHeight - headerHeight - footerHeight - fallbackPopoverPadding
+            )
+        }
+
+        return max(minimumContentHeight, fallbackScreenHeight - fallbackScreenMargin)
+    }
+
+    static func acceptedMeasuredContentHeight(
+        previousMeasuredHeight: CGFloat?,
+        newMeasuredHeight: CGFloat,
+        minimumUsableHeight: CGFloat = 1
+    ) -> CGFloat? {
+        guard newMeasuredHeight > minimumUsableHeight else {
+            return previousMeasuredHeight
+        }
+
+        return newMeasuredHeight
+    }
+
     static func needsScroll(measuredHeight: CGFloat?, maxVisibleContentHeight: CGFloat) -> Bool {
         guard let measuredHeight else { return true }
         return measuredHeight >= maxVisibleContentHeight
@@ -36,6 +92,48 @@ enum MenuContentLayout {
         }
 
         return min(defaultContentHeight, maxVisibleContentHeight)
+    }
+
+    static func visibleContentHeight(
+        measuredHeight: CGFloat?,
+        lastMeasuredHeight: CGFloat?,
+        maxVisibleContentHeight: CGFloat,
+        defaultContentHeight: CGFloat = MenuContentSizing.provisionalContentHeight
+    ) -> CGFloat {
+        if let measuredHeight, measuredHeight < maxVisibleContentHeight {
+            return measuredHeight
+        }
+
+        return provisionalScrollFrameHeight(
+            measuredHeight: measuredHeight,
+            lastMeasuredHeight: lastMeasuredHeight,
+            maxVisibleContentHeight: maxVisibleContentHeight,
+            defaultContentHeight: defaultContentHeight
+        )
+    }
+
+    static func preferredPopoverHeight(
+        headerHeight: CGFloat,
+        footerHeight: CGFloat,
+        measuredContentHeight: CGFloat?,
+        lastMeasuredContentHeight: CGFloat?,
+        maxVisibleContentHeight: CGFloat,
+        defaultContentHeight: CGFloat = MenuContentSizing.provisionalContentHeight
+    ) -> CGFloat {
+        headerHeight + footerHeight + visibleContentHeight(
+            measuredHeight: measuredContentHeight,
+            lastMeasuredHeight: lastMeasuredContentHeight,
+            maxVisibleContentHeight: maxVisibleContentHeight,
+            defaultContentHeight: defaultContentHeight
+        )
+    }
+
+    static func shouldRequestPopoverResize(
+        headerHeight: CGFloat,
+        footerHeight: CGFloat,
+        initialMeasurementDone: Bool
+    ) -> Bool {
+        initialMeasurementDone && headerHeight > 0 && footerHeight > 0
     }
 }
 
@@ -82,10 +180,19 @@ enum MenuSelection: Hashable {
     case benchmark
 }
 
+struct BenchmarkSectionExpansionState {
+    var globalIndex = true
+    var ranking = true
+    var vendorComparison = false
+    var recommendations = false
+    var alerts = false
+    var degradations = false
+}
+
 struct StatusMenuContentView: View {
     let store: StatusStore
     let benchmarkStore: AIStupidLevelStore
-    @Environment(\.openWindow) private var openWindow
+    let hostCoordinator: MenuHostCoordinator
     @State private var selection: MenuSelection?
     @State private var contentHeights: [MenuSelection: CGFloat] = [:]
     @State private var tooltipState = TooltipState()
@@ -94,8 +201,10 @@ struct StatusMenuContentView: View {
     @State private var pendingBenchmarkHoverInfo: BenchmarkRowHoverInfo?
     @State private var benchmarkHoverHeight: CGFloat = 0
     @State private var benchmarkHoverTask: Task<Void, Never>?
+    @State private var benchmarkSections = BenchmarkSectionExpansionState()
     @State private var initialMeasurementDone = false
     @State private var lastMeasuredContentHeight: CGFloat?
+    @State private var pendingSelectionMeasurement: MenuSelection?
     @State private var headerHeight: CGFloat = 0
     @State private var footerHeight: CGFloat = 0
     @State private var measuredMenuWidth: CGFloat = MenuContentSizing.width
@@ -122,11 +231,12 @@ struct StatusMenuContentView: View {
     }
 
     private var maxVisibleContentHeight: CGFloat {
-        let screenHeight = NSScreen.main?.visibleFrame.height ?? 900
-        if headerHeight > 0, footerHeight > 0 {
-            return max(200, screenHeight - headerHeight - footerHeight - 20)
-        }
-        return max(200, screenHeight - MenuContentSizing.minScreenMargin)
+        MenuContentLayout.maxVisibleContentHeight(
+            availablePopoverHeight: hostCoordinator.availablePopoverHeight,
+            fallbackScreenHeight: NSScreen.main?.visibleFrame.height ?? 900,
+            headerHeight: headerHeight,
+            footerHeight: footerHeight
+        )
     }
 
     private var activeContentHeight: CGFloat? {
@@ -143,8 +253,25 @@ struct StatusMenuContentView: View {
     private var scrollFrameHeight: CGFloat {
         MenuContentLayout.provisionalScrollFrameHeight(
             measuredHeight: activeContentHeight,
-            lastMeasuredHeight: lastMeasuredContentHeight,
+            lastMeasuredHeight: fallbackMeasuredContentHeight,
             maxVisibleContentHeight: maxVisibleContentHeight
+        )
+    }
+
+    private var preferredPopoverHeight: CGFloat {
+        MenuContentLayout.preferredPopoverHeight(
+            headerHeight: headerHeight,
+            footerHeight: footerHeight,
+            measuredContentHeight: activeContentHeight,
+            lastMeasuredContentHeight: fallbackMeasuredContentHeight,
+            maxVisibleContentHeight: maxVisibleContentHeight
+        )
+    }
+
+    private var fallbackMeasuredContentHeight: CGFloat? {
+        MenuContentLayout.fallbackMeasuredHeight(
+            lastMeasuredHeight: lastMeasuredContentHeight,
+            usesLastMeasuredFallback: pendingSelectionMeasurement == activeSelection
         )
     }
 
@@ -213,6 +340,7 @@ struct StatusMenuContentView: View {
                     measuredContent
                 }
                 .scrollBounceBehavior(.basedOnSize)
+                .scrollIndicators(.hidden)
                 .frame(height: scrollFrameHeight)
             } else {
                 measuredContent
@@ -258,24 +386,26 @@ struct StatusMenuContentView: View {
                                 Image(systemName: "arrow.clockwise")
                             }
                             .help("Refresh")
+                            .focusable(false)
                             .modifier(FooterIconHover())
                         }
 
                         Button {
-                            openWindow(id: "settings")
-                            NSApp.activate(ignoringOtherApps: true)
+                            hostCoordinator.openSettings()
                         } label: {
                             Image(systemName: "gearshape")
                         }
                         .help("Settings")
+                        .focusable(false)
                         .modifier(FooterIconHover())
 
                         Button {
-                            NSApplication.shared.terminate(nil)
+                            hostCoordinator.quit()
                         } label: {
                             Image(systemName: "power")
                         }
                         .help("Quit")
+                        .focusable(false)
                         .modifier(FooterIconHover())
                     }
                     .buttonStyle(.plain)
@@ -295,6 +425,8 @@ struct StatusMenuContentView: View {
         .coordinateSpace(name: "menu")
         .environment(tooltipState)
         .onChange(of: activeSelection) { _, newSelection in
+            hostCoordinator.selectionDidChange()
+            pendingSelectionMeasurement = newSelection
             if case .benchmark = newSelection {
                 return
             }
@@ -309,6 +441,17 @@ struct StatusMenuContentView: View {
                         measuredMenuWidth = width
                     }
             }
+        }
+        .onChange(of: preferredPopoverHeight, initial: true) { _, height in
+            guard MenuContentLayout.shouldRequestPopoverResize(
+                headerHeight: headerHeight,
+                footerHeight: footerHeight,
+                initialMeasurementDone: initialMeasurementDone
+            ) else {
+                return
+            }
+            guard height > 0 else { return }
+            hostCoordinator.requestPopoverResize(height)
         }
         .overlay(alignment: .topLeading) {
             if case .benchmark = activeSelection,
@@ -375,13 +518,23 @@ struct StatusMenuContentView: View {
             selectedProviderContent
         }
         .id(activeSelection)
-        .frame(width: measuredMenuWidth, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .background {
             GeometryReader { proxy in
                 Color.clear
                     .onChange(of: proxy.size.height, initial: true) { _, h in
-                        contentHeights[activeSelection] = h
-                        lastMeasuredContentHeight = h
+                        guard let acceptedHeight = MenuContentLayout.acceptedMeasuredContentHeight(
+                            previousMeasuredHeight: contentHeights[activeSelection],
+                            newMeasuredHeight: h
+                        ) else {
+                            return
+                        }
+
+                        contentHeights[activeSelection] = acceptedHeight
+                        lastMeasuredContentHeight = acceptedHeight
+                        if pendingSelectionMeasurement == activeSelection {
+                            pendingSelectionMeasurement = nil
+                        }
                         if !initialMeasurementDone { initialMeasurementDone = true }
                     }
             }
@@ -395,6 +548,7 @@ struct StatusMenuContentView: View {
             if benchmarkStore.hasVisibleContent {
                 AIStupidLevelPageView(
                     benchmarkStore: benchmarkStore,
+                    sections: $benchmarkSections,
                     availableProviders: enabledProviders,
                     onNavigateToProvider: { provider in
                         benchmarkHoverTask?.cancel()
@@ -514,6 +668,112 @@ private struct InlineMenuErrorBanner: View {
     }
 }
 
+struct MenuTabButton<Label: View>: View {
+    let isSelected: Bool
+    let action: () -> Void
+    @ViewBuilder let label: () -> Label
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            label()
+                .foregroundStyle(isSelected ? .primary : .secondary)
+                .frame(maxWidth: .infinity, minHeight: MenuTabMetrics.minHeight, alignment: .leading)
+                .padding(.horizontal, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(isSelected ? Color.primary.opacity(0.1) : isHovered ? Color.primary.opacity(0.05) : .clear)
+                        .animation(.easeInOut(duration: 0.15), value: isHovered)
+                )
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .onHover { isHovered = $0 }
+    }
+}
+
+struct MenuGridPlaceholderCell: View {
+    var body: some View {
+        Color.clear
+            .frame(maxWidth: .infinity)
+            .gridCellUnsizedAxes(.vertical)
+    }
+}
+
+struct MenuCollapsibleHeader<RowContent: View, BelowContent: View>: View {
+    let isExpanded: Bool
+    let action: () -> Void
+    let horizontalPadding: CGFloat
+    let verticalPadding: CGFloat
+    let contentSpacing: CGFloat
+    @ViewBuilder let rowContent: () -> RowContent
+    @ViewBuilder let belowContent: () -> BelowContent
+
+    @State private var isHovered = false
+
+    init(
+        isExpanded: Bool,
+        horizontalPadding: CGFloat = 16,
+        verticalPadding: CGFloat = 8,
+        contentSpacing: CGFloat = 8,
+        action: @escaping () -> Void,
+        @ViewBuilder rowContent: @escaping () -> RowContent,
+        @ViewBuilder belowContent: @escaping () -> BelowContent
+    ) {
+        self.isExpanded = isExpanded
+        self.action = action
+        self.horizontalPadding = horizontalPadding
+        self.verticalPadding = verticalPadding
+        self.contentSpacing = contentSpacing
+        self.rowContent = rowContent
+        self.belowContent = belowContent
+    }
+
+    init(
+        isExpanded: Bool,
+        horizontalPadding: CGFloat = 16,
+        verticalPadding: CGFloat = 8,
+        contentSpacing: CGFloat = 8,
+        action: @escaping () -> Void,
+        @ViewBuilder rowContent: @escaping () -> RowContent
+    ) where BelowContent == EmptyView {
+        self.init(
+            isExpanded: isExpanded,
+            horizontalPadding: horizontalPadding,
+            verticalPadding: verticalPadding,
+            contentSpacing: contentSpacing,
+            action: action,
+            rowContent: rowContent,
+            belowContent: { EmptyView() }
+        )
+    }
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: contentSpacing) {
+                HStack(alignment: .center, spacing: 8) {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(isHovered ? .primary : .tertiary)
+                        .scaleEffect(isHovered ? 1.2 : 1.0)
+
+                    rowContent()
+                }
+
+                belowContent()
+            }
+            .padding(.horizontal, horizontalPadding)
+            .padding(.vertical, verticalPadding)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .onHover { isHovered = $0 }
+        .animation(.easeInOut(duration: 0.15), value: isHovered)
+    }
+}
+
 // MARK: - Provider Tab Grid
 
 private struct ProviderTabGrid: View {
@@ -524,14 +784,15 @@ private struct ProviderTabGrid: View {
     let onSelectProvider: (ProviderConfig) -> Void
     let onSelectBenchmark: () -> Void
 
-    private let columns = 3
-
     var body: some View {
-        Grid(horizontalSpacing: 4, verticalSpacing: 4) {
+        Grid(
+            horizontalSpacing: MenuTabGridLayout.spacing,
+            verticalSpacing: MenuTabGridLayout.spacing
+        ) {
             ForEach(0..<providerRowCount, id: \.self) { rowIndex in
                 GridRow {
-                    ForEach(0..<columns, id: \.self) { col in
-                        let index = rowIndex * columns + col
+                    ForEach(0..<MenuTabGridLayout.columns, id: \.self) { col in
+                        let index = rowIndex * MenuTabGridLayout.columns + col
                         if index < providers.count {
                             let provider = providers[index]
                             ProviderTab(
@@ -542,16 +803,14 @@ private struct ProviderTabGrid: View {
                                 onSelectProvider(provider)
                             }
                         } else {
-                            Color.clear
-                                .frame(maxWidth: .infinity)
-                                .gridCellUnsizedAxes(.vertical)
+                            MenuGridPlaceholderCell()
                         }
                     }
                 }
             }
 
             Divider()
-                .gridCellColumns(columns)
+                .gridCellColumns(MenuTabGridLayout.columns)
                 .padding(.vertical, 2)
 
             GridRow {
@@ -559,19 +818,15 @@ private struct ProviderTabGrid: View {
                     isSelected: activeSelection == .benchmark,
                     action: onSelectBenchmark
                 )
-                Color.clear
-                    .frame(maxWidth: .infinity)
-                    .gridCellUnsizedAxes(.vertical)
-                Color.clear
-                    .frame(maxWidth: .infinity)
-                    .gridCellUnsizedAxes(.vertical)
+                MenuGridPlaceholderCell()
+                MenuGridPlaceholderCell()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var providerRowCount: Int {
-        (providers.count + columns - 1) / columns
+        MenuTabGridLayout.rowCount(for: providers.count)
     }
 }
 
@@ -581,10 +836,8 @@ private struct BenchmarkTab: View {
     let isSelected: Bool
     let action: () -> Void
 
-    @State private var isHovered = false
-
     var body: some View {
-        Button(action: action) {
+        MenuTabButton(isSelected: isSelected, action: action) {
             HStack(spacing: 5) {
                 Image(systemName: "chart.bar.xaxis")
                     .font(.system(size: 10))
@@ -592,19 +845,7 @@ private struct BenchmarkTab: View {
                     .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                     .lineLimit(1)
             }
-            .foregroundStyle(isSelected ? .primary : .secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 6)
-            .padding(.horizontal, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isSelected ? Color.primary.opacity(0.1) : isHovered ? Color.primary.opacity(0.05) : .clear)
-                    .animation(.easeInOut(duration: 0.15), value: isSelected)
-                    .animation(.easeInOut(duration: 0.15), value: isHovered)
-            )
         }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
     }
 }
 
@@ -616,10 +857,8 @@ struct ProviderTab: View {
     let indicator: StatusIndicator?
     let action: () -> Void
 
-    @State private var isHovered = false
-
     var body: some View {
-        Button(action: action) {
+        MenuTabButton(isSelected: isSelected, action: action) {
             HStack(spacing: 5) {
                 if let indicator {
                     Circle()
@@ -631,20 +870,6 @@ struct ProviderTab: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
-            .foregroundStyle(isSelected ? .primary : .secondary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 6)
-            .padding(.horizontal, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isSelected ? Color.primary.opacity(0.1) : isHovered ? Color.primary.opacity(0.05) : .clear)
-                    .animation(.easeInOut(duration: 0.15), value: isSelected)
-                    .animation(.easeInOut(duration: 0.15), value: isHovered)
-            )
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering in
-            isHovered = hovering
         }
     }
 }

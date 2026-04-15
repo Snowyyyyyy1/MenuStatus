@@ -2,23 +2,17 @@ import SwiftUI
 
 struct AIStupidLevelPageView: View {
     let benchmarkStore: AIStupidLevelStore
+    @Binding var sections: BenchmarkSectionExpansionState
     let availableProviders: [ProviderConfig]
     let onNavigateToProvider: (ProviderConfig) -> Void
     let onHoverChange: (BenchmarkRowHoverInfo?) -> Void
-
-    @State private var globalIndexExpanded = true
-    @State private var rankingExpanded = true
-    @State private var vendorComparisonExpanded = false
-    @State private var recommendationsExpanded = false
-    @State private var alertsExpanded = false
-    @State private var degradationsExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let index = benchmarkStore.globalIndex {
                 CollapsibleSection(
                     title: "Global Index",
-                    isExpanded: $globalIndexExpanded
+                    isExpanded: $sections.globalIndex
                 ) {
                     GlobalIndexDetailView(
                         index: index,
@@ -30,7 +24,7 @@ struct AIStupidLevelPageView: View {
             if !benchmarkStore.scores.isEmpty {
                 CollapsibleSection(
                     title: "Model Ranking",
-                    isExpanded: $rankingExpanded
+                    isExpanded: $sections.ranking
                 ) {
                     ModelRankingView(
                         benchmarkStore: benchmarkStore,
@@ -45,6 +39,8 @@ struct AIStupidLevelPageView: View {
             alertsSection
             degradationsSection
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .fixedSize(horizontal: false, vertical: true)
         .padding(.bottom, 8)
         .onDisappear {
             onHoverChange(nil)
@@ -57,7 +53,7 @@ struct AIStupidLevelPageView: View {
         if !rows.isEmpty {
             CollapsibleSection(
                 title: "Vendor Comparison",
-                isExpanded: $vendorComparisonExpanded
+                isExpanded: $sections.vendorComparison
             ) {
                 VendorComparisonView(
                     reliability: rows,
@@ -78,7 +74,7 @@ struct AIStupidLevelPageView: View {
            recs.bestForCode != nil || recs.mostReliable != nil || recs.fastestResponse != nil {
             CollapsibleSection(
                 title: "Recommendations",
-                isExpanded: $recommendationsExpanded
+                isExpanded: $sections.recommendations
             ) {
                 RecommendationsView(recommendations: recs)
             }
@@ -91,7 +87,7 @@ struct AIStupidLevelPageView: View {
         if !alerts.isEmpty {
             CollapsibleSection(
                 title: "Alerts",
-                isExpanded: $alertsExpanded,
+                isExpanded: $sections.alerts,
                 badge: alerts.count
             ) {
                 AlertsListView(alerts: alerts)
@@ -105,7 +101,7 @@ struct AIStupidLevelPageView: View {
         if !items.isEmpty {
             CollapsibleSection(
                 title: "Degradations",
-                isExpanded: $degradationsExpanded,
+                isExpanded: $sections.degradations,
                 badge: items.count
             ) {
                 DegradationsListView(degradations: items)
@@ -126,8 +122,6 @@ private struct CollapsibleSection<Content: View>: View {
     let badge: Int?
     @ViewBuilder let content: () -> Content
 
-    @State private var isHovered = false
-
     init(
         title: String,
         isExpanded: Binding<Bool>,
@@ -142,37 +136,25 @@ private struct CollapsibleSection<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button {
-                isExpanded.toggle()
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(isHovered ? .primary : .tertiary)
-                        .scaleEffect(isHovered ? 1.2 : 1.0)
+            MenuCollapsibleHeader(
+                isExpanded: isExpanded,
+                action: { isExpanded.toggle() }
+            ) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(.primary)
 
-                    Text(title)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.primary)
-
-                    if let badge, badge > 0 {
-                        Text("\(badge)")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(Capsule().fill(.red))
-                    }
-
-                    Spacer()
+                if let badge, badge > 0 {
+                    Text("\(badge)")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(.red))
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .contentShape(Rectangle())
+
+                Spacer()
             }
-            .buttonStyle(.plain)
-            .onHover { isHovered = $0 }
-            .animation(.easeInOut(duration: 0.15), value: isHovered)
 
             if isExpanded {
                 content()
@@ -190,6 +172,18 @@ private struct CollapsibleSection<Content: View>: View {
 private struct GlobalIndexDetailView: View {
     let index: GlobalIndex
     let batchStatus: DashboardBatchStatusData?
+
+    private static let nextRunParser: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter
+    }()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -224,6 +218,8 @@ private struct GlobalIndexDetailView: View {
                         .font(.system(size: 10))
                     Text("Next benchmark: \(nextRun)")
                         .font(.system(size: 11))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
                 .foregroundStyle(.secondary)
             }
@@ -248,11 +244,8 @@ private struct GlobalIndexDetailView: View {
 
     private var formattedNextRun: String? {
         guard let raw = batchStatus?.nextScheduledRun else { return nil }
-        let parser = ISO8601DateFormatter()
-        guard let date = parser.date(from: raw) else { return raw }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter.localizedString(for: date, relativeTo: .now)
+        guard let date = Self.nextRunParser.date(from: raw) else { return raw }
+        return Self.relativeFormatter.localizedString(for: date, relativeTo: .now)
     }
 }
 
@@ -311,7 +304,7 @@ private struct ModelRankingView: View {
     private var filteredScores: [BenchmarkScore] {
         let sorted = scores.sorted { $0.currentScore > $1.currentScore }
         guard let filter = vendorFilter else { return sorted }
-        return sorted.filter { $0.provider.caseInsensitiveCompare(filter) == .orderedSame }
+        return sorted.filter { BenchmarkVendorPresentation.matches($0.provider, filter) }
     }
 
     private var prefetchedModelIDs: [String] {
@@ -325,7 +318,7 @@ private struct ModelRankingView: View {
                 selectedVendor: vendorFilter,
                 onSelectAll: { vendorFilter = nil },
                 onSelectVendor: { vendor in
-                    vendorFilter = vendorFilter == vendor ? nil : vendor
+                    vendorFilter = BenchmarkVendorPresentation.matches(vendorFilter, vendor) ? nil : vendor
                 }
             )
 
@@ -356,14 +349,15 @@ private struct BenchmarkVendorTabGrid: View {
     let onSelectAll: () -> Void
     let onSelectVendor: (String) -> Void
 
-    private let columns = 3
-
     var body: some View {
-        Grid(horizontalSpacing: 4, verticalSpacing: 4) {
+        Grid(
+            horizontalSpacing: MenuTabGridLayout.spacing,
+            verticalSpacing: MenuTabGridLayout.spacing
+        ) {
             ForEach(0..<rowCount, id: \.self) { rowIndex in
                 GridRow {
-                    ForEach(0..<columns, id: \.self) { columnIndex in
-                        let index = rowIndex * columns + columnIndex
+                    ForEach(0..<MenuTabGridLayout.columns, id: \.self) { columnIndex in
+                        let index = rowIndex * MenuTabGridLayout.columns + columnIndex
                         if index == 0 {
                             BenchmarkVendorTab(
                                 label: "All",
@@ -376,13 +370,11 @@ private struct BenchmarkVendorTabGrid: View {
                                 let vendor = vendors[vendorIndex]
                                 BenchmarkVendorTab(
                                     label: BenchmarkVendorPresentation.displayName(for: vendor),
-                                    isSelected: selectedVendor?.caseInsensitiveCompare(vendor) == .orderedSame,
+                                    isSelected: BenchmarkVendorPresentation.matches(selectedVendor, vendor),
                                     action: { onSelectVendor(vendor) }
                                 )
                             } else {
-                                Color.clear
-                                    .frame(maxWidth: .infinity)
-                                    .gridCellUnsizedAxes(.vertical)
+                                MenuGridPlaceholderCell()
                             }
                         }
                     }
@@ -393,8 +385,7 @@ private struct BenchmarkVendorTabGrid: View {
     }
 
     private var rowCount: Int {
-        let itemCount = vendors.count + 1
-        return (itemCount + columns - 1) / columns
+        MenuTabGridLayout.rowCount(for: vendors.count + 1)
     }
 }
 
@@ -403,27 +394,13 @@ private struct BenchmarkVendorTab: View {
     let isSelected: Bool
     let action: () -> Void
 
-    @State private var isHovered = false
-
     var body: some View {
-        Button(action: action) {
+        MenuTabButton(isSelected: isSelected, action: action) {
             Text(label)
                 .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? .primary : .secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 6)
-                .padding(.horizontal, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(isSelected ? Color.primary.opacity(0.1) : isHovered ? Color.primary.opacity(0.05) : .clear)
-                        .animation(.easeInOut(duration: 0.15), value: isSelected)
-                        .animation(.easeInOut(duration: 0.15), value: isHovered)
-                )
         }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
     }
 }
 
@@ -474,6 +451,7 @@ private struct RankedModelRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .focusable(false)
         .background {
             GeometryReader { proxy in
                 Color.clear
@@ -566,6 +544,7 @@ private struct VendorComparisonView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .focusable(false)
             }
         }
     }
@@ -575,7 +554,7 @@ private struct VendorComparisonView: View {
     }
 
     private func vendorSummary(for vendor: String) -> (count: Int, avg: Double) {
-        let matching = scores.filter { $0.provider.caseInsensitiveCompare(vendor) == .orderedSame }
+        let matching = scores.filter { BenchmarkVendorPresentation.matches($0.provider, vendor) }
         let avg = matching.isEmpty ? 0 : matching.map(\.currentScore).reduce(0, +) / Double(matching.count)
         return (matching.count, avg)
     }

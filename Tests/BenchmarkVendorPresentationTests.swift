@@ -23,4 +23,11 @@ final class BenchmarkVendorPresentationTests: XCTestCase {
         XCTAssertEqual(BenchmarkVendorPresentation.chipText(for: "xai"), "XAI")
         XCTAssertEqual(BenchmarkVendorPresentation.chipText(for: "unknown"), "UNK")
     }
+
+    func testMatchesNormalizesWhitespaceAndCase() {
+        XCTAssertTrue(BenchmarkVendorPresentation.matches(" OpenAI ", "openai"))
+        XCTAssertTrue(BenchmarkVendorPresentation.matches("xAI", " xai\n"))
+        XCTAssertFalse(BenchmarkVendorPresentation.matches("openai", "anthropic"))
+        XCTAssertFalse(BenchmarkVendorPresentation.matches(nil, "openai"))
+    }
 }

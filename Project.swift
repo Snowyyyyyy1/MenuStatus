@@ -27,7 +27,6 @@ let project = Project(
             resources: ["Sources/Resources/**"],
             dependencies: [
                 .external(name: "Sparkle"),
-                .external(name: "MenuBarExtraAccess"),
             ],
             settings: .settings(base: [
                 "MARKETING_VERSION": .string(marketingVersion),

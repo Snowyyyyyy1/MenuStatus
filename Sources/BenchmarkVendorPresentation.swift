@@ -22,7 +22,7 @@ enum BenchmarkVendorPresentation {
     ]
 
     static func displayName(for rawVendor: String) -> String {
-        let normalized = normalize(rawVendor)
+        let normalized = normalizedID(for: rawVendor)
         if let explicit = displayNames[normalized] {
             return explicit
         }
@@ -31,14 +31,14 @@ enum BenchmarkVendorPresentation {
     }
 
     static func orderedVendorIDs(from vendors: [String]) -> [String] {
-        Array(Set(vendors.map(normalize).filter { !$0.isEmpty }))
+        Array(Set(vendors.map(normalizedID).filter { !$0.isEmpty }))
             .sorted {
                 displayName(for: $0).localizedCaseInsensitiveCompare(displayName(for: $1)) == .orderedAscending
             }
     }
 
     static func chipText(for rawVendor: String) -> String {
-        let normalized = normalize(rawVendor)
+        let normalized = normalizedID(for: rawVendor)
         if let alias = chipAliases[normalized] {
             return alias
         }
@@ -46,7 +46,7 @@ enum BenchmarkVendorPresentation {
     }
 
     static func color(for rawVendor: String) -> Color {
-        switch normalize(rawVendor) {
+        switch normalizedID(for: rawVendor) {
         case "openai": return .green
         case "anthropic": return .orange
         case "google": return .blue
@@ -58,7 +58,15 @@ enum BenchmarkVendorPresentation {
         }
     }
 
-    private static func normalize(_ rawVendor: String) -> String {
+    static func matches(_ lhs: String?, _ rhs: String?) -> Bool {
+        guard let lhs, let rhs else { return false }
+        let normalizedLHS = normalizedID(for: lhs)
+        let normalizedRHS = normalizedID(for: rhs)
+        guard !normalizedLHS.isEmpty, !normalizedRHS.isEmpty else { return false }
+        return normalizedLHS == normalizedRHS
+    }
+
+    static func normalizedID(for rawVendor: String) -> String {
         rawVendor.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }
