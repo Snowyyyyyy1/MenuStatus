@@ -1,15 +1,47 @@
+<p align="center">
+  <img src="Sources/Resources/Assets.xcassets/AppIcon.appiconset/icon_1024x1024.png" width="128" alt="MenuStatus app icon">
+</p>
+
 # MenuStatus
 
-A native macOS menu bar app for supported public status pages and AI benchmark snapshots.
+<p align="center">
+  <a href="./README.md">English</a> · <a href="./README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Snowyyyyyy1/MenuStatus/releases/latest"><img alt="Latest Release" src="https://img.shields.io/github/v/release/Snowyyyyyy1/MenuStatus?display_name=tag"></a>
+  <a href="./LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg"></a>
+  <img alt="Platform macOS 14+" src="https://img.shields.io/badge/platform-macOS%2014%2B-black">
+</p>
+
+A native macOS menu bar app for two supported kinds of public status pages, plus a built-in AI benchmark snapshot view.
 
 MenuStatus has two primary views:
 
-- **Supported Status Pages** — parse public status pages built on **Atlassian Statuspage** and **incident.io**
-- **AI Stupid Level** — check AI benchmark data including global index, model ranking, vendor comparison, alerts, recommendations, and degradations
+- **Supported Status Pages**: parse public status pages built on **Atlassian Statuspage** and **incident.io**
+- **AI Stupid Level**: check benchmark snapshots including global index, model ranking, vendor comparison, recommendations, alerts, and degradations
 
-[Download Latest DMG](https://github.com/Snowyyyyyy1/MenuStatus/releases/latest) · [Release Notes](https://github.com/Snowyyyyyy1/MenuStatus/releases) · [Build From Source](#build-from-source)
+<p align="center">
+  <a href="https://github.com/Snowyyyyyy1/MenuStatus/releases/latest">Download Latest DMG</a> ·
+  <a href="https://github.com/Snowyyyyyy1/MenuStatus/releases">Release Notes</a> ·
+  <a href="#build-from-source">Build From Source</a>
+</p>
 
-## Two Primary Views
+## Screenshots
+
+<p align="center">
+  <img src="docs/assets/readme/gallery/01-status-1password.png" width="32%" alt="1Password status page overview">
+  <img src="docs/assets/readme/gallery/02-status-1password-hover.png" width="32%" alt="1Password status page hover details">
+  <img src="docs/assets/readme/gallery/03-status-claude.png" width="32%" alt="Claude status page overview">
+</p>
+
+<p align="center">
+  <img src="docs/assets/readme/gallery/04-benchmark-ranking.png" width="32%" alt="AI Stupid Level benchmark ranking overview">
+  <img src="docs/assets/readme/gallery/05-benchmark-panels.png" width="32%" alt="AI Stupid Level vendor comparison and recommendations panels">
+  <img src="docs/assets/readme/gallery/06-benchmark-hover.png" width="32%" alt="AI Stupid Level hover card details">
+</p>
+
+## What It Does
 
 ### Supported Status Pages
 
@@ -18,14 +50,14 @@ MenuStatus is not a generic parser for arbitrary status sites. It currently supp
 - **Atlassian Statuspage**
 - **incident.io**
 
-Built-in providers include **OpenAI** and **Anthropic**. You can also add other compatible status-page URLs such as GitHub, Cloudflare, 1Password, Proton, and similar services built on those two formats.
+Built-in providers include **OpenAI** and **Anthropic**. You can also add compatible URLs from services built on those same two formats, such as GitHub, Cloudflare, 1Password, Proton, and similar providers.
 
 From the menu bar you can:
 
 - switch between providers quickly
 - inspect grouped components and uptime bars
 - view active incidents and recent history
-- open a provider's official status page when you need the full context
+- jump to the official provider status page when you need full context
 
 ### AI Stupid Level
 
@@ -42,28 +74,14 @@ It surfaces:
 
 This gives the app a second primary workflow alongside service-status tracking: checking whether model quality and reliability appear to be slipping.
 
-## Screenshots
+## Supported Platforms
 
-<p align="center">
-  <img src="docs/assets/readme/gallery/01-status-1password.png" width="32%" alt="1Password status page overview">
-  <img src="docs/assets/readme/gallery/02-status-1password-hover.png" width="32%" alt="1Password status page hover details">
-  <img src="docs/assets/readme/gallery/03-status-claude.png" width="32%" alt="Claude status page overview">
-</p>
-
-<p align="center">
-  <img src="docs/assets/readme/gallery/04-benchmark-ranking.png" width="32%" alt="AI Stupid Level benchmark ranking overview">
-  <img src="docs/assets/readme/gallery/05-benchmark-panels.png" width="32%" alt="AI Stupid Level vendor comparison and recommendations panels">
-  <img src="docs/assets/readme/gallery/06-benchmark-hover.png" width="32%" alt="AI Stupid Level hover card details">
-</p>
-
-## Download
-
-- Latest builds are published on [GitHub Releases](https://github.com/Snowyyyyyy1/MenuStatus/releases/latest)
-- Requires **macOS 14.0+**
-- The repository includes a GitHub Actions workflow that builds a Release `.app`, packages it as a `.dmg`, and uploads it to Releases
-- Signed release builds can check GitHub Pages for `appcast.xml` and install updates in-app via Sparkle
-
-If Apple signing and notarization secrets are not configured yet, the workflow can still publish an unsigned `.dmg` so the release path remains testable end to end.
+| Area | Support |
+| --- | --- |
+| Status pages | Atlassian Statuspage, incident.io |
+| Built-in providers | OpenAI, Anthropic |
+| Custom providers | Compatible URLs using those same two formats |
+| AI benchmark view | AI Stupid Level |
 
 ## Compatibility
 
@@ -78,6 +96,15 @@ If Apple signing and notarization secrets are not configured yet, the workflow c
 
 - arbitrary custom status websites outside those formats
 - providers with fully custom status UIs that do not expose compatible Atlassian Statuspage or incident.io structures
+
+## Download
+
+- Latest builds are published on [GitHub Releases](https://github.com/Snowyyyyyy1/MenuStatus/releases/latest)
+- Requires **macOS 14.0+**
+- The repository includes a GitHub Actions workflow that builds a Release `.app`, packages it as a `.dmg`, and uploads it to Releases
+- Signed release builds can use Sparkle and GitHub Pages appcast updates when signing/notarization is configured
+
+If Apple signing and notarization secrets are not configured yet, the workflow can still publish an unsigned `.dmg` so the release path remains testable end to end.
 
 ## Privacy
 
@@ -120,7 +147,7 @@ TUIST_SKIP_UPDATE_CHECK=1 tuist xcodebuild test \
 
 ### Publish A DMG Release
 
-Push a version tag and GitHub Actions will build a Release `.app`, package it as a `.dmg`, upload it to GitHub Releases, and publish `appcast.xml` to GitHub Pages:
+Push a version tag and GitHub Actions will build a Release `.app`, package it as a `.dmg`, and upload it to GitHub Releases:
 
 ```bash
 git tag v0.1.0
@@ -131,31 +158,7 @@ The workflow is defined in `.github/workflows/release.yml` and uses [`package-ap
 
 By default the script uses `hdiutil` so it works reliably in CI. If you want a styled Finder layout locally and already have [`create-dmg`](https://github.com/create-dmg/create-dmg) installed, run `USE_CREATE_DMG=1 ./package-app.sh 0.1.0`.
 
-One-time Sparkle setup:
-
-```bash
-./Scripts/setup-sparkle-keys.sh
-```
-
-Required GitHub repository secrets for DMG-only in-app updates:
-
-- `SPARKLE_PUBLIC_ED_KEY`: Public Ed25519 key embedded in release builds
-- `SPARKLE_PRIVATE_ED_KEY`: Private Ed25519 key used in CI to sign the DMG and generate `appcast.xml`
-
-GitHub Pages must be enabled for this repository. The workflow publishes the update feed to:
-
-```text
-https://<owner>.github.io/<repo>/appcast.xml
-```
-
-The release build injects these values during `tuist generate`:
-
-- `MENU_STATUS_VERSION`
-- `MENU_STATUS_BUILD`
-- `MENU_STATUS_FEED_URL`
-- `MENU_STATUS_PUBLIC_ED_KEY`
-
-Recommended GitHub repository secrets for signed/notarized builds:
+Optional GitHub repository secrets for signed/notarized builds:
 
 - `APPLE_CERTIFICATE_P12_BASE64`: Base64-encoded Developer ID Application certificate (`.p12`)
 - `APPLE_CERTIFICATE_PASSWORD`: Password for the `.p12`
@@ -163,8 +166,6 @@ Recommended GitHub repository secrets for signed/notarized builds:
 - `APPLE_ID`: Apple ID email used for notarization
 - `APPLE_APP_SPECIFIC_PASSWORD`: App-specific password for that Apple ID
 - `APPLE_TEAM_ID`: Apple Developer team ID
-
-If the Apple signing secrets are omitted, the workflow still publishes a DMG and appcast, but signed/notarized releases are the intended production setup.
 
 ## Architecture
 
@@ -193,4 +194,4 @@ Generated `.xcodeproj` / `.xcworkspace` and build outputs (`.build/`, `Derived/`
 
 ## License
 
-MIT
+Licensed under [AGPL-3.0](./LICENSE).
