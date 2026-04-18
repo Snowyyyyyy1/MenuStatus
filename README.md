@@ -195,3 +195,13 @@ Generated `.xcodeproj` / `.xcworkspace` and build outputs (`.build/`, `Derived/`
 ## License
 
 Licensed under [AGPL-3.0](./LICENSE).
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=wxtsky%2FCodeIsland&type=date&legend=bottom-right">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=wxtsky/CodeIsland&type=date&theme=dark&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=wxtsky/CodeIsland&type=date&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=wxtsky/CodeIsland&type=date&legend=bottom-right" />
+ </picture>
+</a>
