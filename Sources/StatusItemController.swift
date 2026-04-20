@@ -71,6 +71,7 @@ final class MenuStatusAppDelegate: NSObject, NSApplicationDelegate {
         let benchmarkStore: AIStupidLevelStore
         let indicator: StatusIndicator
         let iconStyle: MenuBarIconStyle
+        let statusItemTitle: String
         let openSettings: () -> Void
     }
 
@@ -92,6 +93,7 @@ final class MenuStatusAppDelegate: NSObject, NSApplicationDelegate {
         benchmarkStore: AIStupidLevelStore,
         indicator: StatusIndicator,
         iconStyle: MenuBarIconStyle,
+        statusItemTitle: String,
         openSettings: @escaping () -> Void
     ) {
         let configuration = Configuration(
@@ -99,6 +101,7 @@ final class MenuStatusAppDelegate: NSObject, NSApplicationDelegate {
             benchmarkStore: benchmarkStore,
             indicator: indicator,
             iconStyle: iconStyle,
+            statusItemTitle: statusItemTitle,
             openSettings: openSettings
         )
         self.configuration = configuration
@@ -125,7 +128,8 @@ final class MenuStatusAppDelegate: NSObject, NSApplicationDelegate {
         controller.setOpenSettingsAction(configuration.openSettings)
         controller.updateStatusItem(
             indicator: configuration.indicator,
-            style: configuration.iconStyle
+            style: configuration.iconStyle,
+            title: configuration.statusItemTitle
         )
     }
 }
@@ -135,14 +139,15 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
     private let hostCoordinator = MenuHostCoordinator()
-    private let hostingController: NSHostingController<StatusMenuContentView>
+    private let hostingController: NSHostingController<LocalizedMenuRootView>
     private var pendingShrinkTask: Task<Void, Never>?
     private var selectionTransitionDeadline: Date?
     private var popoverFrameHeightOverhead: CGFloat = PopoverSizing.frameOverheadEstimate
 
     init(store: StatusStore, benchmarkStore: AIStupidLevelStore) {
         hostingController = NSHostingController(
-            rootView: StatusMenuContentView(
+            rootView: LocalizedMenuRootView(
+                settings: store.settings,
                 store: store,
                 benchmarkStore: benchmarkStore,
                 hostCoordinator: hostCoordinator
@@ -161,12 +166,13 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         }
     }
 
-    func updateStatusItem(indicator: StatusIndicator, style: MenuBarIconStyle) {
+    func updateStatusItem(indicator: StatusIndicator, style: MenuBarIconStyle, title: String) {
         guard let button = statusItem.button else { return }
         button.image = MenuBarIconRenderer.image(indicator: indicator, style: style)
         button.imagePosition = .imageOnly
         button.imageScaling = .scaleProportionallyDown
-        button.toolTip = indicator.displayName
+        button.toolTip = title
+        button.setAccessibilityLabel(title)
     }
 
     @objc

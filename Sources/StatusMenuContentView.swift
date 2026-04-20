@@ -12,18 +12,100 @@ enum MenuTabMetrics {
 }
 
 enum MenuTabGridLayout {
-    static let columns = 3
     static let spacing: CGFloat = 4
     static let providerHorizontalPadding: CGFloat = 10
+    static let maxRows: Int = 4
+    static let minComfortableTabWidth: CGFloat = 60
+    static let tabHorizontalPadding: CGFloat = 12
+    static let tabInnerSpacing: CGFloat = 5
+    static let statusDotWidth: CGFloat = 6
+    static let tabTextFontSize: CGFloat = 13
 
-    static func columnWidth(forAvailableWidth availableWidth: CGFloat) -> CGFloat {
-        guard availableWidth > 0 else { return 0 }
-        return (availableWidth - spacing * CGFloat(columns - 1)) / CGFloat(columns)
+    struct LayoutPlan: Equatable {
+        let rowCount: Int
+        let perRow: Int
+        let uniformWidth: CGFloat
     }
 
-    static func rowCount(for itemCount: Int) -> Int {
-        guard itemCount > 0 else { return 0 }
-        return (itemCount + columns - 1) / columns
+    static func availableRowWidth(totalWidth: CGFloat = MenuContentSizing.width) -> CGFloat {
+        max(0, totalWidth - providerHorizontalPadding * 2)
+    }
+
+    static func textWidth(
+        _ text: String,
+        fontSize: CGFloat = tabTextFontSize,
+        weight: NSFont.Weight = .semibold
+    ) -> CGFloat {
+        guard !text.isEmpty else { return 0 }
+        let font = NSFont.systemFont(ofSize: fontSize, weight: weight)
+        return ceil((text as NSString).size(withAttributes: [.font: font]).width)
+    }
+
+    /// Content width for a tab drawn with `MenuTabButton`. Measured in the widest
+    /// (selected = semibold) state so layout is stable across selection changes.
+    static func tabContentWidth(
+        text: String,
+        hasLeadingDot: Bool = false,
+        leadingIconWidth: CGFloat = 0
+    ) -> CGFloat {
+        var total = textWidth(text) + tabHorizontalPadding
+        if hasLeadingDot {
+            total += statusDotWidth + tabInnerSpacing
+        }
+        if leadingIconWidth > 0 {
+            total += leadingIconWidth + tabInnerSpacing
+        }
+        // Tiny slack to avoid last-pixel truncation in HiDPI rounding.
+        return ceil(total + 2)
+    }
+
+    /// Pick a row count (1..maxRows) and a uniform per-tab width so that every tab
+    /// has at least the comfortable minimum width and, when possible, room for its
+    /// natural content. Uniform width fills the row (CodexBar-style expansion).
+    static func resolveLayout(
+        widths: [CGFloat],
+        availableWidth: CGFloat,
+        maxRows: Int = maxRows,
+        minComfortableWidth: CGFloat = minComfortableTabWidth
+    ) -> LayoutPlan {
+        guard !widths.isEmpty, availableWidth > 0 else {
+            return LayoutPlan(rowCount: 0, perRow: 0, uniformWidth: 0)
+        }
+        let count = widths.count
+        let maxDesired = widths.max() ?? 0
+        let effectiveMaxRows = min(maxRows, count)
+
+        var chosenRows = effectiveMaxRows
+        var chosenPerRow = Int(ceil(Double(count) / Double(effectiveMaxRows)))
+        var chosenAllowed = (availableWidth - spacing * CGFloat(chosenPerRow - 1)) / CGFloat(chosenPerRow)
+
+        for rows in 1...effectiveMaxRows {
+            let perRow = Int(ceil(Double(count) / Double(rows)))
+            let allowed = (availableWidth - spacing * CGFloat(max(0, perRow - 1))) / CGFloat(perRow)
+            let fitsContent = allowed >= maxDesired
+            let comfortable = allowed >= minComfortableWidth
+            if fitsContent || (comfortable && rows == effectiveMaxRows) {
+                chosenRows = rows
+                chosenPerRow = perRow
+                chosenAllowed = allowed
+                break
+            }
+            if rows == effectiveMaxRows {
+                chosenRows = rows
+                chosenPerRow = perRow
+                chosenAllowed = allowed
+            }
+        }
+
+        let uniform = max(0, floor(chosenAllowed))
+        return LayoutPlan(rowCount: chosenRows, perRow: chosenPerRow, uniformWidth: uniform)
+    }
+
+    static func rowRange(count: Int, perRow: Int, rowIndex: Int) -> Range<Int> {
+        guard perRow > 0 else { return 0..<0 }
+        let start = rowIndex * perRow
+        let end = min(count, start + perRow)
+        return start..<end
     }
 }
 
@@ -199,6 +281,7 @@ struct StatusMenuContentView: View {
     let store: StatusStore
     let benchmarkStore: AIStupidLevelStore
     let hostCoordinator: MenuHostCoordinator
+    @Environment(\.locale) private var locale
     @State private var selection: MenuSelection?
     @State private var contentHeights: [MenuSelection: CGFloat] = [:]
     @State private var tooltipState = TooltipState()
@@ -368,13 +451,16 @@ struct StatusMenuContentView: View {
                 // Footer
                 HStack {
                     if !store.isConnected {
-                        Label("Offline", systemImage: "wifi.slash")
+                        Label("menu.offline", systemImage: "wifi.slash")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else if let date = activeLastRefreshed {
                         TimelineView(.periodic(from: .now, by: 1)) { context in
-                            let seconds = Int(context.date.timeIntervalSince(date))
-                            Text("Updated \(seconds < 60 ? "\(seconds) sec" : "\(seconds / 60) min") ago")
+                            Text(AppStrings.updatedString(
+                                since: date,
+                                referenceDate: context.date,
+                                locale: locale
+                            ))
                         }
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -391,7 +477,11 @@ struct StatusMenuContentView: View {
                             } label: {
                                 Image(systemName: "arrow.clockwise")
                             }
-                            .help("Refresh")
+                            .help(AppStrings.localizedString(
+                                "menu.footer.refresh.help",
+                                locale: locale,
+                                defaultValue: "Refresh"
+                            ))
                             .focusable(false)
                             .modifier(FooterIconHover())
                         }
@@ -401,7 +491,11 @@ struct StatusMenuContentView: View {
                         } label: {
                             Image(systemName: "gearshape")
                         }
-                        .help("Settings")
+                        .help(AppStrings.localizedString(
+                            "menu.footer.settings.help",
+                            locale: locale,
+                            defaultValue: "Settings"
+                        ))
                         .focusable(false)
                         .modifier(FooterIconHover())
 
@@ -410,7 +504,11 @@ struct StatusMenuContentView: View {
                         } label: {
                             Image(systemName: "power")
                         }
-                        .help("Quit")
+                        .help(AppStrings.localizedString(
+                            "menu.footer.quit.help",
+                            locale: locale,
+                            defaultValue: "Quit"
+                        ))
                         .focusable(false)
                         .modifier(FooterIconHover())
                     }
@@ -599,7 +697,11 @@ struct StatusMenuContentView: View {
                 loadingPlaceholder
             } else {
                 emptyPlaceholder(
-                    message: "No benchmark data yet."
+                    message: AppStrings.localizedString(
+                        "menu.placeholder.no-benchmark",
+                        locale: locale,
+                        defaultValue: "No benchmark data yet."
+                    )
                 )
             }
         case .provider(let provider):
@@ -617,7 +719,14 @@ struct StatusMenuContentView: View {
     }
 
     private var loadingPlaceholder: some View {
-        placeholder(message: "Loading...", showsProgress: true)
+        placeholder(
+            message: AppStrings.localizedString(
+                "menu.placeholder.loading",
+                locale: locale,
+                defaultValue: "Loading..."
+            ),
+            showsProgress: true
+        )
     }
 
     private func emptyPlaceholder(message: String) -> some View {
@@ -790,20 +899,44 @@ private struct ProviderTabGrid: View {
     let onSelectProvider: (ProviderConfig) -> Void
     let onSelectBenchmark: () -> Void
 
-    private let columnWidth = MenuTabGridLayout.columnWidth(
-        forAvailableWidth: MenuContentSizing.width - MenuTabGridLayout.providerHorizontalPadding * 2
-    )
+    @Environment(\.locale) private var locale
+
+    private var benchmarkLabel: String {
+        AppStrings.localizedString(
+            "menu.tab.benchmark",
+            locale: locale,
+            defaultValue: "Benchmark"
+        )
+    }
 
     var body: some View {
-        Grid(
-            horizontalSpacing: MenuTabGridLayout.spacing,
-            verticalSpacing: MenuTabGridLayout.spacing
-        ) {
-            ForEach(0..<providerRowCount, id: \.self) { rowIndex in
-                GridRow {
-                    ForEach(0..<MenuTabGridLayout.columns, id: \.self) { col in
-                        let index = rowIndex * MenuTabGridLayout.columns + col
-                        if index < providers.count {
+        let availableWidth = MenuTabGridLayout.availableRowWidth()
+        let providerWidths = providers.map { provider in
+            MenuTabGridLayout.tabContentWidth(
+                text: settings.displayName(for: provider),
+                hasLeadingDot: summaries[provider]?.status.indicator != nil
+            )
+        }
+        let benchmarkWidth = MenuTabGridLayout.tabContentWidth(
+            text: benchmarkLabel,
+            leadingIconWidth: MenuTabGridLayout.statusDotWidth + 4
+        )
+        let combinedWidths = providerWidths + [benchmarkWidth]
+        let plan = MenuTabGridLayout.resolveLayout(
+            widths: combinedWidths,
+            availableWidth: availableWidth
+        )
+
+        VStack(alignment: .leading, spacing: MenuTabGridLayout.spacing) {
+            ForEach(0..<plan.rowCount, id: \.self) { rowIndex in
+                let range = MenuTabGridLayout.rowRange(
+                    count: providers.count,
+                    perRow: plan.perRow,
+                    rowIndex: rowIndex
+                )
+                if !range.isEmpty {
+                    HStack(spacing: MenuTabGridLayout.spacing) {
+                        ForEach(range, id: \.self) { index in
                             let provider = providers[index]
                             ProviderTab(
                                 name: settings.displayName(for: provider),
@@ -812,36 +945,26 @@ private struct ProviderTabGrid: View {
                             ) {
                                 onSelectProvider(provider)
                             }
-                            .frame(width: columnWidth, alignment: .leading)
-                        } else {
-                            MenuGridPlaceholderCell()
-                                .frame(width: columnWidth)
+                            .frame(width: plan.uniformWidth, alignment: .leading)
                         }
+                        Spacer(minLength: 0)
                     }
                 }
             }
 
             Divider()
-                .gridCellColumns(MenuTabGridLayout.columns)
                 .padding(.vertical, 2)
 
-            GridRow {
+            HStack(spacing: MenuTabGridLayout.spacing) {
                 BenchmarkTab(
                     isSelected: activeSelection == .benchmark,
                     action: onSelectBenchmark
                 )
-                .frame(width: columnWidth, alignment: .leading)
-                MenuGridPlaceholderCell()
-                    .frame(width: columnWidth)
-                MenuGridPlaceholderCell()
-                    .frame(width: columnWidth)
+                .frame(width: plan.uniformWidth, alignment: .leading)
+                Spacer(minLength: 0)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var providerRowCount: Int {
-        MenuTabGridLayout.rowCount(for: providers.count)
     }
 }
 
@@ -856,7 +979,7 @@ private struct BenchmarkTab: View {
             HStack(spacing: 5) {
                 Image(systemName: "chart.bar.xaxis")
                     .font(.system(size: 10))
-                Text("Benchmark")
+                Text("menu.tab.benchmark")
                     .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
                     .lineLimit(1)
             }

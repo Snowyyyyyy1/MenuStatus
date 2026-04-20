@@ -12,6 +12,7 @@ struct ProviderSectionView: View {
     let summary: StatuspageSummary?
     let store: StatusStore
     let settings: SettingsStore
+    @Environment(\.locale) private var locale
 
     private var visibleComponents: [Component] {
         (summary?.components ?? []).filter { $0.group != true }
@@ -38,7 +39,10 @@ struct ProviderSectionView: View {
     @ViewBuilder
     private func statusPageContent(summary: StatuspageSummary) -> some View {
         HStack {
-            Label(summary.status.indicator.displayName, systemImage: summary.status.indicator.sfSymbol)
+            Label(
+                AppStrings.statusIndicatorName(summary.status.indicator, locale: locale),
+                systemImage: summary.status.indicator.sfSymbol
+            )
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(summary.status.indicator.color)
             Spacer()
@@ -99,6 +103,7 @@ struct GroupHeaderView: View {
     let provider: ProviderConfig
     let store: StatusStore
     let dayDetails: [Date: [DayIncidentDetail]]
+    @Environment(\.locale) private var locale
 
     var body: some View {
         MenuCollapsibleHeader(
@@ -111,13 +116,13 @@ struct GroupHeaderView: View {
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.primary)
 
-                Text("\(section.componentCount) component\(section.componentCount == 1 ? "" : "s")")
+                Text(AppStrings.componentCountString(section.componentCount, locale: locale))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
 
                 Spacer()
 
-                Text(section.status.displayName)
+                Text(AppStrings.componentStatusName(section.status, locale: locale))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(section.status.color)
             }
@@ -137,6 +142,7 @@ struct ComponentUptimeRow: View {
     let dayDetails: [Date: [DayIncidentDetail]]
     let statusPageURL: URL
     var contentPaddingLeading: CGFloat = 16
+    @Environment(\.locale) private var locale
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -144,7 +150,7 @@ struct ComponentUptimeRow: View {
                 Text(component.name)
                     .font(.system(size: 12, weight: .semibold))
                 Spacer()
-                Text(component.status.displayName)
+                Text(AppStrings.componentStatusName(component.status, locale: locale))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(component.status.color)
             }
@@ -168,23 +174,32 @@ struct ComponentUptimeRow: View {
 struct UptimeBarWithLabels: View {
     let timeline: ComponentTimeline
     let dayDetails: [Date: [DayIncidentDetail]]
+    @Environment(\.locale) private var locale
 
     var body: some View {
         VStack(spacing: 0) {
             UptimeBarView(timeline: timeline, height: UptimeBarStyle.height, dayDetails: dayDetails)
 
             HStack {
-                Text("90 days ago")
+                Text("timeline.label.90-days-ago")
                     .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
                 Spacer()
                 Text(timeline.hasMeasuredDays
-                    ? String(format: "%@%.2f%% uptime", timeline.isEstimated ? "≈ " : "", timeline.uptimePercent)
-                    : "No data")
+                    ? AppStrings.uptimeString(
+                        timeline.uptimePercent,
+                        isEstimated: timeline.isEstimated,
+                        locale: locale
+                    )
+                    : AppStrings.localizedString(
+                        "timeline.label.no-data",
+                        locale: locale,
+                        defaultValue: "No data"
+                    ))
                     .font(.system(size: 9, weight: .medium))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text("Today")
+                Text("timeline.label.today")
                     .font(.system(size: 9))
                     .foregroundStyle(.tertiary)
             }
@@ -264,12 +279,7 @@ struct DayDetailTooltip: View {
     let day: DayStatus
     let details: [DayIncidentDetail]
     @Environment(\.colorScheme) private var colorScheme
-
-    private static let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "d MMM yyyy"
-        return f
-    }()
+    @Environment(\.locale) private var locale
 
     private var groupedDetails: [(level: TimelineDayLevel, totalSeconds: TimeInterval)] {
         var byLevel: [TimelineDayLevel: TimeInterval] = [:]
@@ -286,7 +296,7 @@ struct DayDetailTooltip: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(Self.dateFormatter.string(from: day.date))
+            Text(AppStrings.tooltipDateString(day.date, locale: locale))
                 .font(.system(size: 11, weight: .semibold))
 
             if !groupedDetails.isEmpty {
@@ -295,10 +305,10 @@ struct DayDetailTooltip: View {
                         Circle()
                             .fill(entry.level.color)
                             .frame(width: 6, height: 6)
-                        Text(entry.level.displayName.capitalized)
+                        Text(AppStrings.timelineDayLevelName(entry.level, locale: locale))
                             .font(.system(size: 10, weight: .medium))
                         Spacer()
-                        Text(formatDuration(entry.totalSeconds))
+                        Text(AppStrings.durationString(entry.totalSeconds, locale: locale))
                             .font(.system(size: 10))
                             .foregroundStyle(.primary.opacity(HoverSurfaceStyle.secondaryTextOpacity(for: colorScheme)))
                     }
@@ -306,7 +316,7 @@ struct DayDetailTooltip: View {
 
                 if !incidentNames.isEmpty {
                     Divider()
-                    Text("RELATED")
+                    Text(AppStrings.relatedIncidentsTitle(locale: locale))
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(.primary.opacity(HoverSurfaceStyle.tertiaryTextOpacity(for: colorScheme)))
                     ForEach(incidentNames, id: \.self) { name in
@@ -320,21 +330,13 @@ struct DayDetailTooltip: View {
         .frame(width: UptimeBarStyle.tooltipWidth)
         .readableHoverSurface()
     }
-
-    private func formatDuration(_ seconds: TimeInterval) -> String {
-        let hours = Int(seconds) / 3600
-        let mins = (Int(seconds) % 3600) / 60
-        if hours > 0 {
-            return "\(hours) hrs \(mins) mins"
-        }
-        return "\(max(1, mins)) mins"
-    }
 }
 
 // MARK: - Incident Row
 
 struct IncidentRow: View {
     let incident: Incident
+    @Environment(\.locale) private var locale
 
     private var impact: StatusIndicator {
         incident.impact ?? .minor
@@ -350,7 +352,7 @@ struct IncidentRow: View {
                     .font(.system(size: 12, weight: .medium))
                 Spacer()
                 if incident.impact != nil {
-                    Text(impact.impactLabel.uppercased())
+                    Text(AppStrings.impactLabel(impact, locale: locale))
                         .font(.system(size: 9, weight: .bold))
                         .padding(.horizontal, 5)
                         .padding(.vertical, 2)
