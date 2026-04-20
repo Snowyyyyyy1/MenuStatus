@@ -7,7 +7,6 @@ struct MenuStatusApp: App {
     @State private var settings: SettingsStore
     @State private var store: StatusStore
     @State private var benchmarkStore: AIStupidLevelStore
-    @State private var settingsWindowPresenter = SettingsWindowPresenter()
     @State private var updaterService = UpdaterService()
 
     init() {
@@ -26,9 +25,22 @@ struct MenuStatusApp: App {
     var body: some Scene {
         let _ = configureStatusItemHost()
 
-        Settings {
-            SettingsView(settings: settings, store: store, updaterService: updaterService)
+        WindowGroup(SettingsSceneBridge.keepaliveWindowTitle) {
+            HiddenSettingsBridgeView()
         }
+        .defaultSize(
+            width: SettingsSceneBridge.keepaliveSceneSize.width,
+            height: SettingsSceneBridge.keepaliveSceneSize.height
+        )
+        .windowStyle(.hiddenTitleBar)
+
+        Settings {
+            LocalizedSettingsRootView(settings: settings, store: store, updaterService: updaterService)
+        }
+        .defaultSize(
+            width: SettingsWindowMetrics.defaultContentSize.width,
+            height: SettingsWindowMetrics.defaultContentSize.height
+        )
         .windowResizability(.contentSize)
     }
 
@@ -39,10 +51,12 @@ struct MenuStatusApp: App {
             benchmarkStore: benchmarkStore,
             indicator: store.overallIndicator,
             iconStyle: settings.iconStyle,
+            statusItemTitle: AppStrings.statusIndicatorName(
+                store.overallIndicator,
+                locale: settings.effectiveLocale
+            ),
             openSettings: {
-                settingsWindowPresenter.show {
-                    SettingsView(settings: settings, store: store, updaterService: updaterService)
-                }
+                SettingsSceneBridge.requestOpen()
             }
         )
     }
@@ -77,13 +91,13 @@ enum MenuBarIconRenderer {
     private static func buildOutline(indicator: StatusIndicator, sizeConfig: NSImage.SymbolConfiguration) -> NSImage {
         let symbol = indicator.menuBarSymbol
         if indicator == .none {
-            let image = NSImage(systemSymbolName: symbol, accessibilityDescription: indicator.displayName)?
+            let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
                 .withSymbolConfiguration(sizeConfig) ?? NSImage()
             image.isTemplate = true
             return image
         }
         let config = NSImage.SymbolConfiguration(paletteColors: [NSColor(indicator.color)]).applying(sizeConfig)
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: indicator.displayName)?
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(config) ?? NSImage()
         image.isTemplate = false
         return image
@@ -119,7 +133,7 @@ enum MenuBarIconRenderer {
         let symbol = indicator.sfSymbol
         let baseColor = NSColor(indicator.color)
         let config = NSImage.SymbolConfiguration(hierarchicalColor: baseColor).applying(sizeConfig)
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: indicator.displayName)?
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(config) ?? NSImage()
         image.isTemplate = false
         return image

@@ -13,6 +13,10 @@ enum MenuBarIconStyle: Int, CaseIterable {
 final class SettingsStore {
     private let defaults: UserDefaults
 
+    var languagePreference: AppLanguagePreference {
+        didSet { defaults.set(languagePreference.rawValue, forKey: Keys.languagePreference) }
+    }
+
     var refreshInterval: TimeInterval {
         didSet { defaults.set(refreshInterval, forKey: Keys.refreshInterval) }
     }
@@ -67,10 +71,25 @@ final class SettingsStore {
         return provider.displayName
     }
 
+    var effectiveLocale: Locale {
+        languagePreference.effectiveLocale
+    }
+
+    var effectiveLanguageCode: String {
+        languagePreference.effectiveLanguageCode
+    }
+
     private(set) var providerConfigs: ProviderConfigStore!
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+
+        if let rawLanguagePreference = defaults.string(forKey: Keys.languagePreference),
+           let languagePreference = AppLanguagePreference(rawValue: rawLanguagePreference) {
+            self.languagePreference = languagePreference
+        } else {
+            self.languagePreference = .system
+        }
 
         if let interval = defaults.object(forKey: Keys.refreshInterval) as? TimeInterval, interval > 0 {
             self.refreshInterval = interval
@@ -121,6 +140,7 @@ final class SettingsStore {
     }
 
     private enum Keys {
+        static let languagePreference = "languagePreference"
         static let refreshInterval = "refreshInterval"
         static let launchAtLogin = "launchAtLogin"
         static let disabledProviderIDs = "disabledProviderIDs"

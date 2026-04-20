@@ -34,6 +34,7 @@ claude.md
 .github/skills/
 .opencode/
 .trae/
+.trellis/
 
 # Misc local tooling
 .idea/
