@@ -48,7 +48,7 @@ struct ModelHistorySparkline: View {
 }
 
 struct ScoreBar: View {
-    let score: Double
+    let score: Double?
     let lower: Double?
     let upper: Double?
     let color: Color
@@ -56,27 +56,29 @@ struct ScoreBar: View {
     var body: some View {
         GeometryReader { proxy in
             let w = proxy.size.width
-            let clampedScore = min(100, max(0, score))
-            let scoreWidth = w * clampedScore / 100
-
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .fill(Color.primary.opacity(0.08))
 
-                if let lower, let upper {
-                    let lowerClamped = min(100, max(0, lower))
-                    let upperClamped = min(100, max(0, upper))
-                    let ciStart = w * lowerClamped / 100
-                    let ciEnd = w * upperClamped / 100
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(color.opacity(0.25))
-                        .frame(width: max(0, ciEnd - ciStart))
-                        .offset(x: ciStart)
-                }
+                if let score {
+                    let clampedScore = min(100, max(0, score))
+                    let scoreWidth = w * clampedScore / 100
 
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(color)
-                    .frame(width: scoreWidth)
+                    if let lower, let upper {
+                        let lowerClamped = min(100, max(0, lower))
+                        let upperClamped = min(100, max(0, upper))
+                        let ciStart = w * lowerClamped / 100
+                        let ciEnd = w * upperClamped / 100
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(color.opacity(0.25))
+                            .frame(width: max(0, ciEnd - ciStart))
+                            .offset(x: ciStart)
+                    }
+
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(color)
+                        .frame(width: scoreWidth)
+                }
             }
         }
     }
@@ -88,6 +90,7 @@ struct BenchmarkModelHoverCard: View {
     let stats: BenchmarkModelStats?
     let history: ModelHistoryPayload?
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.locale) private var locale
 
     private static let timestampFormatter = ISO8601DateFormatter()
     private static let relativeFormatter: RelativeDateTimeFormatter = {
@@ -106,17 +109,19 @@ struct BenchmarkModelHoverCard: View {
 
     private var freshnessLabel: String {
         guard let raw = score.lastUpdated ?? detail?.latestScore?.ts else {
-            return "Update time unavailable"
+            return AppStrings.localizedString(
+                "benchmark.update-time-unavailable",
+                locale: locale,
+                defaultValue: "Update time unavailable"
+            )
         }
         guard let date = Self.timestampFormatter.date(from: raw) else {
             return raw
         }
 
+        Self.relativeFormatter.locale = locale
         let relative = Self.relativeFormatter.localizedString(for: date, relativeTo: .now)
-        if score.isStale == true {
-            return "Stale • \(relative)"
-        }
-        return "Updated \(relative)"
+        return AppStrings.freshnessLabel(relative: relative, isStale: score.isStale == true, locale: locale)
     }
 
     private var sparklinePoints: [ModelHistoryPoint] {
@@ -151,11 +156,13 @@ struct BenchmarkModelHoverCard: View {
                     VendorChip(vendor: detail?.vendor ?? score.provider)
 
                     HStack(spacing: 4) {
-                        Image(systemName: score.trend.symbol)
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(score.trend.color)
+                        if score.currentScore != nil {
+                            Image(systemName: score.trend.symbol)
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(score.trend.color)
+                        }
 
-                        Text("\(Int(score.currentScore.rounded()))")
+                        Text(score.currentScore.map { String(Int($0.rounded())) } ?? "--")
                             .font(.system(size: 16, weight: .bold, design: .rounded))
                             .foregroundStyle(score.status.color)
                     }
@@ -173,26 +180,56 @@ struct BenchmarkModelHoverCard: View {
             if detail?.usesReasoningEffort == true || detail?.supportsToolCalling == true {
                 HStack(spacing: 6) {
                     if detail?.usesReasoningEffort == true {
-                        BenchmarkBadge(label: "Reasoning", color: .blue)
+                        BenchmarkBadge(
+                            label: AppStrings.localizedString(
+                                "benchmark.reasoning",
+                                locale: locale,
+                                defaultValue: "Reasoning"
+                            ),
+                            color: .blue
+                        )
                     }
                     if detail?.supportsToolCalling == true {
-                        BenchmarkBadge(label: "Tools", color: .purple)
+                        BenchmarkBadge(
+                            label: AppStrings.localizedString(
+                                "benchmark.tools",
+                                locale: locale,
+                                defaultValue: "Tools"
+                            ),
+                            color: .purple
+                        )
                     }
                 }
             }
 
             if let stats {
                 HStack(spacing: 10) {
-                    BenchmarkStatItem(title: "Runs", value: stats.totalRuns.map(String.init) ?? "--")
-                    BenchmarkStatItem(title: "Success", value: formatPercent(stats.successRate))
-                    BenchmarkStatItem(title: "Latency", value: formatLatency(stats.averageLatency))
-                    BenchmarkStatItem(title: "Correct", value: formatFraction(stats.averageCorrectness))
+                    BenchmarkStatItem(
+                        title: AppStrings.localizedString("benchmark.stat.runs", locale: locale, defaultValue: "Runs"),
+                        value: stats.totalRuns.map(String.init) ?? "--"
+                    )
+                    BenchmarkStatItem(
+                        title: AppStrings.localizedString("benchmark.stat.success", locale: locale, defaultValue: "Success"),
+                        value: formatPercent(stats.successRate)
+                    )
+                    BenchmarkStatItem(
+                        title: AppStrings.localizedString("benchmark.stat.latency", locale: locale, defaultValue: "Latency"),
+                        value: formatLatency(stats.averageLatency)
+                    )
+                    BenchmarkStatItem(
+                        title: AppStrings.localizedString("benchmark.stat.correct", locale: locale, defaultValue: "Correct"),
+                        value: formatFraction(stats.averageCorrectness)
+                    )
                 }
             }
 
             if sparklinePoints.count >= 2 {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("RECENT TREND")
+                    Text(AppStrings.localizedString(
+                        "benchmark.recent-trend",
+                        locale: locale,
+                        defaultValue: "RECENT TREND"
+                    ))
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(.tertiary)
 

@@ -6,12 +6,17 @@ struct AIStupidLevelPageView: View {
     let availableProviders: [ProviderConfig]
     let onNavigateToProvider: (ProviderConfig) -> Void
     let onHoverChange: (BenchmarkRowHoverInfo?) -> Void
+    @Environment(\.locale) private var locale
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let index = benchmarkStore.globalIndex {
                 CollapsibleSection(
-                    title: "Global Index",
+                    title: AppStrings.localizedString(
+                        "benchmark.section.global-index",
+                        locale: locale,
+                        defaultValue: "Global Index"
+                    ),
                     isExpanded: $sections.globalIndex
                 ) {
                     GlobalIndexDetailView(
@@ -23,7 +28,11 @@ struct AIStupidLevelPageView: View {
 
             if !benchmarkStore.scores.isEmpty {
                 CollapsibleSection(
-                    title: "Model Ranking",
+                    title: AppStrings.localizedString(
+                        "benchmark.section.model-ranking",
+                        locale: locale,
+                        defaultValue: "Model Ranking"
+                    ),
                     isExpanded: $sections.ranking
                 ) {
                     ModelRankingView(
@@ -52,7 +61,11 @@ struct AIStupidLevelPageView: View {
         let rows = benchmarkStore.providerReliability
         if !rows.isEmpty {
             CollapsibleSection(
-                title: "Vendor Comparison",
+                title: AppStrings.localizedString(
+                    "benchmark.section.vendor-comparison",
+                    locale: locale,
+                    defaultValue: "Vendor Comparison"
+                ),
                 isExpanded: $sections.vendorComparison
             ) {
                 VendorComparisonView(
@@ -73,7 +86,11 @@ struct AIStupidLevelPageView: View {
         if let recs = benchmarkStore.recommendations,
            recs.bestForCode != nil || recs.mostReliable != nil || recs.fastestResponse != nil {
             CollapsibleSection(
-                title: "Recommendations",
+                title: AppStrings.localizedString(
+                    "benchmark.section.recommendations",
+                    locale: locale,
+                    defaultValue: "Recommendations"
+                ),
                 isExpanded: $sections.recommendations
             ) {
                 RecommendationsView(recommendations: recs)
@@ -86,7 +103,11 @@ struct AIStupidLevelPageView: View {
         let alerts = benchmarkStore.dashboardAlerts
         if !alerts.isEmpty {
             CollapsibleSection(
-                title: "Alerts",
+                title: AppStrings.localizedString(
+                    "benchmark.section.alerts",
+                    locale: locale,
+                    defaultValue: "Alerts"
+                ),
                 isExpanded: $sections.alerts,
                 badge: alerts.count
             ) {
@@ -100,7 +121,11 @@ struct AIStupidLevelPageView: View {
         let items = benchmarkStore.degradations
         if !items.isEmpty {
             CollapsibleSection(
-                title: "Degradations",
+                title: AppStrings.localizedString(
+                    "benchmark.section.degradations",
+                    locale: locale,
+                    defaultValue: "Degradations"
+                ),
                 isExpanded: $sections.degradations,
                 badge: items.count
             ) {
@@ -172,6 +197,7 @@ private struct CollapsibleSection<Content: View>: View {
 private struct GlobalIndexDetailView: View {
     let index: GlobalIndex
     let batchStatus: DashboardBatchStatusData?
+    @Environment(\.locale) private var locale
 
     private static let nextRunParser: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -188,7 +214,7 @@ private struct GlobalIndexDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text("\(Int(index.current.globalScore.rounded()))")
+                Text(index.current.globalScore.map { String(Int($0.rounded())) } ?? "--")
                     .font(.system(size: 28, weight: .bold, design: .rounded))
                     .foregroundStyle(.primary)
 
@@ -196,14 +222,14 @@ private struct GlobalIndexDetailView: View {
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(trendColor)
 
-                Text(index.trend.capitalized)
+                Text(AppStrings.localizedTrendName(index.trend, locale: locale))
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
 
                 Spacer()
 
                 if let totalModels = index.totalModels {
-                    Text("\(totalModels) models")
+                    Text(AppStrings.modelCountString(totalModels, locale: locale))
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -216,7 +242,7 @@ private struct GlobalIndexDetailView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "calendar")
                         .font(.system(size: 10))
-                    Text("Next benchmark: \(nextRun)")
+                    Text(AppStrings.nextBenchmarkString(nextRun, locale: locale))
                         .font(.system(size: 11))
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -245,6 +271,7 @@ private struct GlobalIndexDetailView: View {
     private var formattedNextRun: String? {
         guard let raw = batchStatus?.nextScheduledRun else { return nil }
         guard let date = Self.nextRunParser.date(from: raw) else { return raw }
+        Self.relativeFormatter.locale = locale
         return Self.relativeFormatter.localizedString(for: date, relativeTo: .now)
     }
 }
@@ -254,35 +281,75 @@ private struct LargeIndexChart: View {
 
     var body: some View {
         Canvas { context, size in
-            guard points.count >= 2 else { return }
-            let scores = points.map(\.globalScore)
+            let numericPoints = points.enumerated().compactMap { index, point in
+                point.globalScore.map { (index: index, value: $0) }
+            }
+            guard numericPoints.count >= 2 else { return }
+            let hasGaps = numericPoints.count != points.count
+            let scores = numericPoints.map(\.value)
             let minV = (scores.min() ?? 0) - 2
             let maxV = (scores.max() ?? 100) + 2
             let range = max(1, maxV - minV)
 
-            var fillPath = Path()
-            var linePath = Path()
-            for (i, score) in scores.enumerated() {
-                let x = CGFloat(i) / CGFloat(scores.count - 1) * size.width
-                let y = size.height - CGFloat((score - minV) / range) * size.height
-                if i == 0 {
-                    fillPath.move(to: CGPoint(x: x, y: size.height))
-                    fillPath.addLine(to: CGPoint(x: x, y: y))
-                    linePath.move(to: CGPoint(x: x, y: y))
-                } else {
-                    fillPath.addLine(to: CGPoint(x: x, y: y))
-                    linePath.addLine(to: CGPoint(x: x, y: y))
+            if !hasGaps {
+                var fillPath = Path()
+                var linePath = Path()
+                for point in numericPoints {
+                    let x = CGFloat(point.index) / CGFloat(points.count - 1) * size.width
+                    let y = size.height - CGFloat((point.value - minV) / range) * size.height
+                    if point.index == 0 {
+                        fillPath.move(to: CGPoint(x: x, y: size.height))
+                        fillPath.addLine(to: CGPoint(x: x, y: y))
+                        linePath.move(to: CGPoint(x: x, y: y))
+                    } else {
+                        fillPath.addLine(to: CGPoint(x: x, y: y))
+                        linePath.addLine(to: CGPoint(x: x, y: y))
+                    }
+                }
+                fillPath.addLine(to: CGPoint(x: size.width, y: size.height))
+                fillPath.closeSubpath()
+
+                context.fill(fillPath, with: .color(.accentColor.opacity(0.1)))
+                context.stroke(
+                    linePath,
+                    with: .color(.accentColor.opacity(0.7)),
+                    style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+                )
+            } else {
+                var linePath = Path()
+                var hasOpenRun = false
+                for (index, point) in points.enumerated() {
+                    guard let score = point.globalScore else {
+                        if hasOpenRun {
+                            context.stroke(
+                                linePath,
+                                with: .color(.accentColor.opacity(0.7)),
+                                style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+                            )
+                            linePath = Path()
+                            hasOpenRun = false
+                        }
+                        continue
+                    }
+
+                    let x = CGFloat(index) / CGFloat(points.count - 1) * size.width
+                    let y = size.height - CGFloat((score - minV) / range) * size.height
+                    if !hasOpenRun {
+                        linePath.move(to: CGPoint(x: x, y: y))
+                        hasOpenRun = true
+                    } else {
+                        linePath.addLine(to: CGPoint(x: x, y: y))
+                    }
+                }
+
+                if hasOpenRun {
+                    context.stroke(
+                        linePath,
+                        with: .color(.accentColor.opacity(0.7)),
+                        style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+                    )
                 }
             }
-            fillPath.addLine(to: CGPoint(x: size.width, y: size.height))
-            fillPath.closeSubpath()
-
-            context.fill(fillPath, with: .color(.accentColor.opacity(0.1)))
-            context.stroke(
-                linePath,
-                with: .color(.accentColor.opacity(0.7)),
-                style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
-            )
         }
     }
 }
@@ -302,7 +369,7 @@ private struct ModelRankingView: View {
     }
 
     private var filteredScores: [BenchmarkScore] {
-        let sorted = scores.sorted { $0.currentScore > $1.currentScore }
+        let sorted = BenchmarkPresentationLogic.sortedScoresForRanking(scores)
         guard let filter = vendorFilter else { return sorted }
         return sorted.filter { BenchmarkVendorPresentation.matches($0.provider, filter) }
     }
@@ -348,35 +415,39 @@ private struct BenchmarkVendorTabGrid: View {
     let selectedVendor: String?
     let onSelectAll: () -> Void
     let onSelectVendor: (String) -> Void
+    @Environment(\.locale) private var locale
+
+    private var allLabel: String {
+        AppStrings.localizedString(
+            "benchmark.tab.all",
+            locale: locale,
+            defaultValue: "All"
+        )
+    }
 
     var body: some View {
-        Grid(
-            horizontalSpacing: MenuTabGridLayout.spacing,
-            verticalSpacing: MenuTabGridLayout.spacing
-        ) {
-            ForEach(0..<rowCount, id: \.self) { rowIndex in
-                GridRow {
-                    ForEach(0..<MenuTabGridLayout.columns, id: \.self) { columnIndex in
-                        let index = rowIndex * MenuTabGridLayout.columns + columnIndex
-                        if index == 0 {
-                            BenchmarkVendorTab(
-                                label: "All",
-                                isSelected: selectedVendor == nil,
-                                action: onSelectAll
-                            )
-                        } else {
-                            let vendorIndex = index - 1
-                            if vendorIndex < vendors.count {
-                                let vendor = vendors[vendorIndex]
-                                BenchmarkVendorTab(
-                                    label: BenchmarkVendorPresentation.displayName(for: vendor),
-                                    isSelected: BenchmarkVendorPresentation.matches(selectedVendor, vendor),
-                                    action: { onSelectVendor(vendor) }
-                                )
-                            } else {
-                                MenuGridPlaceholderCell()
-                            }
+        let availableWidth = MenuTabGridLayout.availableRowWidth()
+        let labels = [allLabel] + vendors.map { BenchmarkVendorPresentation.displayName(for: $0) }
+        let widths = labels.map { MenuTabGridLayout.tabContentWidth(text: $0) }
+        let plan = MenuTabGridLayout.resolveLayout(
+            widths: widths,
+            availableWidth: availableWidth
+        )
+
+        VStack(alignment: .leading, spacing: MenuTabGridLayout.spacing) {
+            ForEach(0..<plan.rowCount, id: \.self) { rowIndex in
+                let range = MenuTabGridLayout.rowRange(
+                    count: labels.count,
+                    perRow: plan.perRow,
+                    rowIndex: rowIndex
+                )
+                if !range.isEmpty {
+                    HStack(spacing: MenuTabGridLayout.spacing) {
+                        ForEach(range, id: \.self) { index in
+                            tabView(at: index)
+                                .frame(width: plan.uniformWidth, alignment: .leading)
                         }
+                        Spacer(minLength: 0)
                     }
                 }
             }
@@ -384,8 +455,22 @@ private struct BenchmarkVendorTabGrid: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var rowCount: Int {
-        MenuTabGridLayout.rowCount(for: vendors.count + 1)
+    @ViewBuilder
+    private func tabView(at index: Int) -> some View {
+        if index == 0 {
+            BenchmarkVendorTab(
+                label: allLabel,
+                isSelected: selectedVendor == nil,
+                action: onSelectAll
+            )
+        } else {
+            let vendor = vendors[index - 1]
+            BenchmarkVendorTab(
+                label: BenchmarkVendorPresentation.displayName(for: vendor),
+                isSelected: BenchmarkVendorPresentation.matches(selectedVendor, vendor),
+                action: { onSelectVendor(vendor) }
+            )
+        }
     }
 }
 
@@ -438,15 +523,19 @@ private struct RankedModelRow: View {
                 .frame(height: 8)
                 .frame(maxWidth: .infinity)
 
-                Text("\(Int(score.currentScore.rounded()))")
+                Text(score.currentScore.map { String(Int($0.rounded())) } ?? "--")
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
                     .foregroundStyle(.primary)
                     .frame(width: 22, alignment: .trailing)
 
-                Image(systemName: score.trend.symbol)
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(score.trend.color)
-                    .frame(width: 10)
+                if score.currentScore != nil {
+                    Image(systemName: score.trend.symbol)
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(score.trend.color)
+                        .frame(width: 10)
+                } else {
+                    Color.clear.frame(width: 10)
+                }
             }
             .contentShape(Rectangle())
         }
@@ -511,6 +600,7 @@ private struct VendorComparisonView: View {
     let reliability: [ProviderReliabilityRow]
     let scores: [BenchmarkScore]
     let onSelectVendor: (String) -> Void
+    @Environment(\.locale) private var locale
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -523,19 +613,19 @@ private struct VendorComparisonView: View {
                             .font(.system(size: 11, weight: .medium))
                             .frame(maxWidth: 80, alignment: .leading)
 
-                        let summary = vendorSummary(for: row.provider)
-                        Text("\(summary.count) models")
+                        let summary = BenchmarkPresentationLogic.vendorSummary(for: row.provider, scores: scores)
+                        Text(AppStrings.modelCountString(summary.count, locale: locale))
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
 
-                        Text("avg \(Int(summary.avg.rounded()))")
+                        Text(summary.averageScore.map { AppStrings.averageScoreString(Int($0.rounded()), locale: locale) } ?? "--")
                             .font(.system(size: 10, weight: .medium))
                             .foregroundStyle(.primary)
 
                         Spacer()
 
                         if let trust = row.trustScore {
-                            Text("Trust \(trust)")
+                            Text(AppStrings.trustString(trust, locale: locale))
                                 .font(.system(size: 10))
                                 .foregroundStyle(trust >= 70 ? .green : trust >= 40 ? .yellow : .red)
                         }
@@ -550,13 +640,52 @@ private struct VendorComparisonView: View {
     }
 
     private var sortedRows: [ProviderReliabilityRow] {
-        reliability.sorted { vendorSummary(for: $0.provider).avg > vendorSummary(for: $1.provider).avg }
+        reliability.sorted { lhs, rhs in
+            let lhsSummary = BenchmarkPresentationLogic.vendorSummary(for: lhs.provider, scores: scores)
+            let rhsSummary = BenchmarkPresentationLogic.vendorSummary(for: rhs.provider, scores: scores)
+            switch (lhsSummary.averageScore, rhsSummary.averageScore) {
+            case let (left?, right?):
+                if left != right { return left > right }
+                return lhs.provider < rhs.provider
+            case (nil, nil):
+                return lhs.provider < rhs.provider
+            case (nil, _):
+                return false
+            case (_, nil):
+                return true
+            }
+        }
     }
 
-    private func vendorSummary(for vendor: String) -> (count: Int, avg: Double) {
+}
+
+struct BenchmarkVendorSummary: Equatable {
+    let count: Int
+    let averageScore: Double?
+}
+
+enum BenchmarkPresentationLogic {
+    static func sortedScoresForRanking(_ scores: [BenchmarkScore]) -> [BenchmarkScore] {
+        scores.sorted { lhs, rhs in
+            switch (lhs.currentScore, rhs.currentScore) {
+            case let (left?, right?):
+                if left != right { return left > right }
+                return lhs.name < rhs.name
+            case (nil, nil):
+                return lhs.name < rhs.name
+            case (nil, _):
+                return false
+            case (_, nil):
+                return true
+            }
+        }
+    }
+
+    static func vendorSummary(for vendor: String, scores: [BenchmarkScore]) -> BenchmarkVendorSummary {
         let matching = scores.filter { BenchmarkVendorPresentation.matches($0.provider, vendor) }
-        let avg = matching.isEmpty ? 0 : matching.map(\.currentScore).reduce(0, +) / Double(matching.count)
-        return (matching.count, avg)
+        let values = matching.compactMap(\.currentScore)
+        let averageScore = values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
+        return BenchmarkVendorSummary(count: matching.count, averageScore: averageScore)
     }
 }
 
@@ -564,17 +693,42 @@ private struct VendorComparisonView: View {
 
 private struct RecommendationsView: View {
     let recommendations: AnalyticsRecommendationsPayload
+    @Environment(\.locale) private var locale
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let slot = recommendations.bestForCode {
-                RecommendationCard(category: "Best for Code", icon: "curlybraces", slot: slot)
+                RecommendationCard(
+                    category: AppStrings.localizedString(
+                        "benchmark.recommendation.best-for-code",
+                        locale: locale,
+                        defaultValue: "Best for Code"
+                    ),
+                    icon: "curlybraces",
+                    slot: slot
+                )
             }
             if let slot = recommendations.mostReliable {
-                RecommendationCard(category: "Most Reliable", icon: "shield.lefthalf.filled", slot: slot)
+                RecommendationCard(
+                    category: AppStrings.localizedString(
+                        "benchmark.recommendation.most-reliable",
+                        locale: locale,
+                        defaultValue: "Most Reliable"
+                    ),
+                    icon: "shield.lefthalf.filled",
+                    slot: slot
+                )
             }
             if let slot = recommendations.fastestResponse {
-                RecommendationCard(category: "Fastest Response", icon: "bolt.fill", slot: slot)
+                RecommendationCard(
+                    category: AppStrings.localizedString(
+                        "benchmark.recommendation.fastest-response",
+                        locale: locale,
+                        defaultValue: "Fastest Response"
+                    ),
+                    icon: "bolt.fill",
+                    slot: slot
+                )
             }
         }
     }
@@ -687,6 +841,7 @@ private struct AlertsListView: View {
 
 private struct DegradationsListView: View {
     let degradations: [AnalyticsDegradationItem]
+    @Environment(\.locale) private var locale
 
     private var sorted: [AnalyticsDegradationItem] {
         degradations.sorted { ($0.dropPercentage ?? 0) > ($1.dropPercentage ?? 0) }
@@ -703,7 +858,7 @@ private struct DegradationsListView: View {
 
                     VStack(alignment: .leading, spacing: 1) {
                         HStack(spacing: 4) {
-                            Text(item.modelName ?? "Unknown")
+                            Text(item.modelName ?? AppStrings.unknownLabel(locale: locale))
                                 .font(.system(size: 11, weight: .medium))
                                 .lineLimit(1)
                             if let vendor = item.provider {

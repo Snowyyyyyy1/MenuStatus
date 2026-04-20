@@ -218,6 +218,128 @@ final class AIStupidLevelStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testRefreshNowAcceptsNilGlobalIndexScoreWithoutError() async {
+        let store = makeIsolatedStore(testName: #function)
+
+        let fetcher = AIStupidLevelStore.Fetcher(
+            fetchScores: { [] },
+            fetchGlobalIndex: {
+                try AIStupidLevelClient.decodeGlobalIndex(
+                    Data(
+                        """
+                        {
+                          "success": true,
+                          "data": {
+                            "current": { "timestamp": "2026-04-11T04:58:40.355Z", "label": "Current", "globalScore": null, "modelsCount": 132, "hoursAgo": 0 },
+                            "history": [
+                              { "timestamp": "2026-04-11T04:58:40.355Z", "label": "Current", "globalScore": null, "modelsCount": 132, "hoursAgo": 0 }
+                            ],
+                            "trend": "declining",
+                            "performingWell": 2,
+                            "totalModels": 22,
+                            "lastUpdated": "2026-04-11T04:58:43.775Z"
+                          }
+                        }
+                        """.utf8
+                    )
+                )
+            },
+            fetchDashboardAlerts: { [] },
+            fetchBatchStatus: { DashboardBatchStatusData(isBatchInProgress: nil, schedulerRunning: nil, nextScheduledRun: nil) },
+            fetchRecommendations: { AnalyticsRecommendationsPayload(bestForCode: nil, mostReliable: nil, fastestResponse: nil, avoidNow: []) },
+            fetchDegradations: { [] },
+            fetchProviderReliability: { [] }
+        )
+
+        await store.refreshNow(fetcher: fetcher)
+
+        XCTAssertNotNil(store.globalIndex)
+        XCTAssertNil(store.globalIndex?.current.globalScore)
+        XCTAssertEqual(store.globalIndex?.trend, "declining")
+        XCTAssertEqual(store.globalIndex?.totalModels, 22)
+        XCTAssertNotNil(store.lastRefreshed)
+        XCTAssertNil(store.errorMessage)
+        XCTAssertFalse(store.isLoading)
+    }
+
+    @MainActor
+    func testRefreshNowDecodesLossyBenchmarkScoresWithoutError() async {
+        let store = makeIsolatedStore(testName: #function)
+
+        let fetcher = AIStupidLevelStore.Fetcher(
+            fetchScores: {
+                try AIStupidLevelClient.decodeScores(
+                    Data(
+                        """
+                        {
+                          "success": true,
+                          "data": [
+                            {
+                              "id": "1",
+                              "name": "numeric-score",
+                              "provider": "openai",
+                              "currentScore": 71,
+                              "trend": "stable",
+                              "status": "good"
+                            },
+                            {
+                              "id": "2",
+                              "name": "string-score",
+                              "provider": "anthropic",
+                              "currentScore": "65",
+                              "trend": "up",
+                              "status": "warning"
+                            },
+                            {
+                              "id": "3",
+                              "name": "nil-score",
+                              "provider": "x",
+                              "currentScore": null,
+                              "trend": "down",
+                              "status": "critical"
+                            },
+                            {
+                              "id": "4",
+                              "name": "empty-score",
+                              "provider": "y",
+                              "currentScore": "",
+                              "trend": "stable",
+                              "status": "unknown"
+                            },
+                            {
+                              "id": "5",
+                              "name": "unavailable-score",
+                              "provider": "z",
+                              "currentScore": "unavailable",
+                              "trend": "stable",
+                              "status": "good"
+                            }
+                          ]
+                        }
+                        """.utf8
+                    )
+                )
+            },
+            fetchGlobalIndex: {
+                self.makeGlobalIndex(score: 91)
+            },
+            fetchDashboardAlerts: { [] },
+            fetchBatchStatus: { DashboardBatchStatusData(isBatchInProgress: nil, schedulerRunning: nil, nextScheduledRun: nil) },
+            fetchRecommendations: { AnalyticsRecommendationsPayload(bestForCode: nil, mostReliable: nil, fastestResponse: nil, avoidNow: []) },
+            fetchDegradations: { [] },
+            fetchProviderReliability: { [] }
+        )
+
+        await store.refreshNow(fetcher: fetcher)
+
+        XCTAssertEqual(store.scores.map(\.id), ["1", "2", "3", "4", "5"])
+        XCTAssertEqual(store.scores.map(\.currentScore), [71, 65, nil, nil, nil])
+        XCTAssertNil(store.errorMessage)
+        XCTAssertNotNil(store.lastRefreshed)
+        XCTAssertFalse(store.isLoading)
+    }
+
+    @MainActor
     func testLoadHoverDataIfNeededCachesResultAndDeduplicatesInflightRequests() async {
         let store = makeIsolatedStore(testName: #function)
         let counter = CallCounter()

@@ -56,6 +56,77 @@ final class AIStupidLevelClientTests: XCTestCase {
         XCTAssertEqual(decoded[1].status, .warning)
     }
 
+    func testParseDashboardScoresResponseDecodesLossyCurrentScoreValues() throws {
+        let json = """
+        {
+          "success": true,
+          "data": [
+            {
+              "id": "1",
+              "name": "numeric-score",
+              "provider": "openai",
+              "currentScore": 71,
+              "trend": "stable",
+              "status": "good"
+            },
+            {
+              "id": "2",
+              "name": "string-score",
+              "provider": "anthropic",
+              "currentScore": "65",
+              "trend": "up",
+              "status": "warning"
+            },
+            {
+              "id": "3",
+              "name": "nil-score",
+              "provider": "x",
+              "currentScore": null,
+              "trend": "down",
+              "status": "critical"
+            },
+            {
+              "id": "4",
+              "name": "empty-score",
+              "provider": "y",
+              "currentScore": "",
+              "trend": "stable",
+              "status": "unknown"
+            },
+            {
+              "id": "5",
+              "name": "unavailable-score",
+              "provider": "z",
+              "currentScore": "unavailable",
+              "trend": "stable",
+              "status": "good"
+            }
+          ]
+        }
+        """
+
+        let decoded = try AIStupidLevelClient.decodeScores(Data(json.utf8))
+
+        XCTAssertEqual(decoded.map(\.currentScore), [71, 65, nil, nil, nil])
+    }
+
+    func testParseDashboardScoresResponseTreatsNonFiniteCurrentScoresAsNil() throws {
+        let json = """
+        {
+          "success": true,
+          "data": [
+            { "id": "1", "name": "nan-score", "provider": "openai", "currentScore": "nan", "trend": "stable", "status": "good" },
+            { "id": "2", "name": "pos-inf-score", "provider": "openai", "currentScore": "inf", "trend": "stable", "status": "good" },
+            { "id": "3", "name": "neg-inf-score", "provider": "openai", "currentScore": "-inf", "trend": "stable", "status": "good" }
+          ]
+        }
+        """
+
+        let decoded = try AIStupidLevelClient.decodeScores(Data(json.utf8))
+
+        XCTAssertEqual(decoded.map(\.currentScore), [nil, nil, nil])
+    }
+
     func testUnknownTrendDefaultsToStable() throws {
         let json = """
         {"success":true,"data":[{"id":"1","name":"m","provider":"x","currentScore":50,"trend":"sideways","status":"good"}]}
@@ -87,6 +158,69 @@ final class AIStupidLevelClientTests: XCTestCase {
         XCTAssertEqual(decoded.current.globalScore, 84)
         XCTAssertEqual(decoded.history.count, 2)
         XCTAssertEqual(decoded.trend, "declining")
+    }
+
+    func testParseGlobalIndexResponseDecodesLossyGlobalScoreValues() throws {
+        let json = """
+        {
+          "success": true,
+          "data": {
+            "current": { "timestamp": "2026-04-11T04:58:40.355Z", "label": "Current", "globalScore": "84", "modelsCount": 132, "hoursAgo": 0 },
+            "history": [
+              { "timestamp": "2026-04-11T04:58:40.355Z", "label": "Current", "globalScore": null, "modelsCount": 132, "hoursAgo": 0 },
+              { "timestamp": "2026-04-10T22:58:40.355Z", "label": "6h ago", "globalScore": "", "modelsCount": 132, "hoursAgo": 6 },
+              { "timestamp": "2026-04-10T16:58:40.355Z", "label": "12h ago", "globalScore": "unavailable", "modelsCount": 132, "hoursAgo": 12 }
+            ],
+            "trend": "declining",
+            "performingWell": 2,
+            "totalModels": 22,
+            "lastUpdated": "2026-04-11T04:58:43.775Z"
+          }
+        }
+        """
+
+        let decoded = try AIStupidLevelClient.decodeGlobalIndex(Data(json.utf8))
+
+        XCTAssertEqual(decoded.current.globalScore, 84)
+        XCTAssertEqual(decoded.history.map(\.globalScore), [nil, nil, nil])
+        XCTAssertEqual(decoded.trend, "declining")
+    }
+
+    func testRankingSortOrdersNumericScoresFirstWithDeterministicTies() {
+        let sorted = BenchmarkPresentationLogic.sortedScoresForRanking([
+            makeScore(id: "c", name: "zeta", provider: "openai", score: 91),
+            makeScore(id: "a", name: "alpha", provider: "anthropic", score: 91),
+            makeScore(id: "b", name: "beta", provider: "anthropic", score: 72),
+            makeScore(id: "n", name: "nil", provider: "x", score: nil)
+        ])
+
+        XCTAssertEqual(sorted.map(\.id), ["a", "c", "b", "n"])
+    }
+
+    func testVendorSummaryCountsAllMatchesAndAveragesNumericScoresOnly() {
+        let scores = [
+            makeScore(id: "1", name: "alpha", provider: "openai", score: 90),
+            makeScore(id: "2", name: "beta", provider: "openai", score: nil),
+            makeScore(id: "3", name: "gamma", provider: "openai", score: 50),
+            makeScore(id: "4", name: "delta", provider: "anthropic", score: 80)
+        ]
+
+        let summary = BenchmarkPresentationLogic.vendorSummary(for: "openai", scores: scores)
+
+        XCTAssertEqual(summary.count, 3)
+        XCTAssertEqual(summary.averageScore, 70)
+    }
+
+    func testVendorSummaryReturnsNilAverageWhenNoNumericScoresExist() {
+        let scores = [
+            makeScore(id: "1", name: "alpha", provider: "openai", score: nil),
+            makeScore(id: "2", name: "beta", provider: "openai", score: nil)
+        ]
+
+        let summary = BenchmarkPresentationLogic.vendorSummary(for: "openai", scores: scores)
+
+        XCTAssertEqual(summary.count, 2)
+        XCTAssertNil(summary.averageScore)
     }
 
     func testDecodeDashboardAlerts() throws {
@@ -300,5 +434,21 @@ final class AIStupidLevelClientTests: XCTestCase {
         XCTAssertEqual(decoded.averageLatency, 4548.451756054266)
         XCTAssertEqual(decoded.debug?.period, "latest")
         XCTAssertEqual(decoded.debug?.sortBy, "combined")
+    }
+
+    private func makeScore(id: String, name: String, provider: String, score: Double?) -> BenchmarkScore {
+        BenchmarkScore(
+            id: id,
+            name: name,
+            provider: provider,
+            currentScore: score,
+            trend: .stable,
+            status: .good,
+            confidenceLower: nil,
+            confidenceUpper: nil,
+            standardError: nil,
+            isStale: nil,
+            lastUpdated: nil
+        )
     }
 }
