@@ -149,9 +149,12 @@ jobs:
           # generate_appcast emits one <item> per .dmg, computing Sparkle EdDSA signatures
           # from binary contents. The --download-url-prefix below is a placeholder — the
           # Python post-process step rewrites each enclosure URL to the correct per-tag
-          # GitHub Releases path.
+          # GitHub Releases path. --maximum-deltas 0 disables binary delta generation:
+          # our DMGs are ~4MB so deltas aren't worth the workflow complexity of uploading
+          # .delta files to the matching release and rewriting their URLs.
           echo "$SPARKLE_PRIVATE_ED_KEY" | "$SPARKLE_BIN/generate_appcast" \
             --ed-key-file - \
+            --maximum-deltas 0 \
             --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/__placeholder__/" \
             "$APPCAST_WORK_DIR"
 
