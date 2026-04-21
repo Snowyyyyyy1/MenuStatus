@@ -27,8 +27,13 @@ enum MenuTabGridLayout {
         let uniformWidth: CGFloat
     }
 
-    static func availableRowWidth(totalWidth: CGFloat = MenuContentSizing.width) -> CGFloat {
-        max(0, totalWidth - providerHorizontalPadding * 2)
+    static let sectionContentHorizontalPadding: CGFloat = 16
+
+    static func availableRowWidth(
+        totalWidth: CGFloat = MenuContentSizing.width,
+        sideInset: CGFloat = providerHorizontalPadding
+    ) -> CGFloat {
+        max(0, totalWidth - sideInset * 2)
     }
 
     static func textWidth(
@@ -947,8 +952,8 @@ private struct ProviderTabGrid: View {
                             }
                             .frame(width: plan.uniformWidth, alignment: .leading)
                         }
-                        Spacer(minLength: 0)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
 
@@ -961,8 +966,8 @@ private struct ProviderTabGrid: View {
                     action: onSelectBenchmark
                 )
                 .frame(width: plan.uniformWidth, alignment: .leading)
-                Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

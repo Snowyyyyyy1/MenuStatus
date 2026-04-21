@@ -183,7 +183,7 @@ private struct CollapsibleSection<Content: View>: View {
 
             if isExpanded {
                 content()
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, MenuTabGridLayout.sectionContentHorizontalPadding)
                     .padding(.bottom, 8)
             }
 
@@ -426,7 +426,9 @@ private struct BenchmarkVendorTabGrid: View {
     }
 
     var body: some View {
-        let availableWidth = MenuTabGridLayout.availableRowWidth()
+        let availableWidth = MenuTabGridLayout.availableRowWidth(
+            sideInset: MenuTabGridLayout.sectionContentHorizontalPadding
+        )
         let labels = [allLabel] + vendors.map { BenchmarkVendorPresentation.displayName(for: $0) }
         let widths = labels.map { MenuTabGridLayout.tabContentWidth(text: $0) }
         let plan = MenuTabGridLayout.resolveLayout(
@@ -447,8 +449,8 @@ private struct BenchmarkVendorTabGrid: View {
                             tabView(at: index)
                                 .frame(width: plan.uniformWidth, alignment: .leading)
                         }
-                        Spacer(minLength: 0)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
