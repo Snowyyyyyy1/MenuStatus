@@ -709,7 +709,7 @@ private struct ProviderSidebarList: View {
                     settings.providerOrder = ids
                 }
             }
-            .listStyle(.sidebar)
+            .listStyle(.plain)
             .scrollContentBackground(.hidden)
 
             Divider()
