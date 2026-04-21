@@ -116,9 +116,23 @@ jobs:
 
           mkdir -p "$APPCAST_WORK_DIR" "$PAGES_DIR"
 
-          # Pull every prior release's DMG so the appcast enumerates the full history.
-          # This lets beta users see the latest stable (and vice versa) instead of only
-          # whichever tag was pushed last.
+          # Include only the latest stable release and the latest pre-release in the appcast.
+          # Sparkle's client picks the highest-version visible item — older releases add no value
+          # and some pre-Sparkle-workflow DMGs share CFBundleVersion which would break generate_appcast.
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
+            --json tagName,isPrerelease,createdAt > "$RUNNER_TEMP/releases.json"
+          python3 - "$RUNNER_TEMP/releases.json" "$GITHUB_REF_NAME" > "$RUNNER_TEMP/tags.txt" <<'PYEOF'
+          import json, sys
+          releases = json.load(open(sys.argv[1]))
+          current_tag = sys.argv[2]
+          releases.sort(key=lambda r: r["createdAt"], reverse=True)
+          latest_stable = next((r["tagName"] for r in releases if not r["isPrerelease"]), None)
+          latest_beta = next((r["tagName"] for r in releases if r["isPrerelease"]), None)
+          tags = {t for t in (latest_stable, latest_beta, current_tag) if t}
+          for t in sorted(tags):
+              print(t)
+          PYEOF
+
           while read -r tag; do
             [ -z "$tag" ] && continue
             gh release download "$tag" \
@@ -126,7 +140,7 @@ jobs:
               --dir "$APPCAST_WORK_DIR" \
               --pattern "*.dmg" \
               --skip-existing || true
-          done < <(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName --jq '.[].tagName')
+          done < "$RUNNER_TEMP/tags.txt"
 
           # Always include the freshly built artifact — the release-asset upload above
           # may not be visible yet when this step runs.
