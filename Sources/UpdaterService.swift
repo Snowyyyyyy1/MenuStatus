@@ -86,11 +86,18 @@ struct UpdaterConfiguration: Equatable {
     }
 }
 
+private final class UpdaterChannelDelegate: NSObject, SPUUpdaterDelegate {
+    func allowedChannels(for _: SPUUpdater) -> Set<String> {
+        UserDefaults.standard.bool(forKey: "AllowsBetaUpdates") ? ["beta"] : []
+    }
+}
+
 @Observable final class UpdaterService {
     private let configuration: UpdaterConfiguration
     private let updaterController: SPUStandardUpdaterController?
     private let updater: SPUUpdater?
     private let startupErrorMessage: String?
+    private let channelDelegate: UpdaterChannelDelegate?
 
     init(bundle: Bundle = .main) {
         self.configuration = UpdaterConfiguration(bundle: bundle)
@@ -98,14 +105,17 @@ struct UpdaterConfiguration: Equatable {
             self.updaterController = nil
             self.updater = nil
             self.startupErrorMessage = nil
+            self.channelDelegate = nil
             return
         }
 
+        let delegate = UpdaterChannelDelegate()
         let controller = SPUStandardUpdaterController(
             startingUpdater: false,
-            updaterDelegate: nil,
+            updaterDelegate: delegate,
             userDriverDelegate: nil
         )
+        self.channelDelegate = delegate
         self.updaterController = controller
         self.updater = controller.updater
 
@@ -142,6 +152,11 @@ struct UpdaterConfiguration: Equatable {
     func checkForUpdates() {
         guard canCheckForUpdates else { return }
         updater?.checkForUpdates()
+    }
+
+    func checkForUpdatesInBackground() {
+        guard isAvailable else { return }
+        updater?.checkForUpdatesInBackground()
     }
 
     var canCheckForUpdates: Bool {

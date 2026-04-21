@@ -64,6 +64,10 @@ final class SettingsStore {
         }
     }
 
+    var allowsBetaUpdates: Bool {
+        didSet { defaults.set(allowsBetaUpdates, forKey: Keys.allowsBetaUpdates) }
+    }
+
     func displayName(for provider: ProviderConfig) -> String {
         if let custom = customProviderNames[provider.id], !custom.isEmpty {
             return custom
@@ -111,6 +115,7 @@ final class SettingsStore {
         self.removedBuiltInIDs = Set(defaults.stringArray(forKey: Keys.removedBuiltInIDs) ?? [])
         self.benchmarkSectionExpanded = Set(defaults.stringArray(forKey: Keys.benchmarkSectionExpanded) ?? [])
         self.groupExpansionOverrides = (defaults.dictionary(forKey: Keys.groupExpansionOverrides) as? [String: Bool]) ?? [:]
+        self.allowsBetaUpdates = defaults.bool(forKey: Keys.allowsBetaUpdates)
     }
 
     func attachProviderConfigs(_ store: ProviderConfigStore) {
@@ -150,6 +155,7 @@ final class SettingsStore {
         static let removedBuiltInIDs = "removedBuiltInIDs"
         static let benchmarkSectionExpanded = "benchmarkSectionExpanded"
         static let groupExpansionOverrides = "groupExpansionOverrides"
+        static let allowsBetaUpdates = "AllowsBetaUpdates"
     }
 }
 

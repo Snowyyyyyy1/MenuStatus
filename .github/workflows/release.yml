@@ -85,33 +85,95 @@ jobs:
         run: |
           ./package-app.sh "${GITHUB_REF_NAME#v}"
 
+      - name: Detect release channel
+        id: channel
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$VERSION" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Upload GitHub release asset
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ steps.package.outputs.artifact_path }}
           generate_release_notes: true
           fail_on_unmatched_files: true
+          prerelease: ${{ steps.channel.outputs.prerelease }}
 
       - name: Generate appcast.xml
         env:
           SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
           ARTIFACT_PATH="${{ steps.package.outputs.artifact_path }}"
           ARTIFACT_NAME="${{ steps.package.outputs.artifact_name }}"
           SPARKLE_BIN="Tuist/.build/artifacts/sparkle/Sparkle/bin"
           APPCAST_WORK_DIR="$RUNNER_TEMP/appcast"
           PAGES_DIR="$RUNNER_TEMP/pages"
-          DOWNLOAD_PREFIX="https://github.com/${GITHUB_REPOSITORY}/releases/download/v$VERSION/"
 
           mkdir -p "$APPCAST_WORK_DIR" "$PAGES_DIR"
-          cp "$ARTIFACT_PATH" "$APPCAST_WORK_DIR/$ARTIFACT_NAME"
 
-          echo "$SPARKLE_PRIVATE_ED_KEY" | "$SPARKLE_BIN/sign_update" --ed-key-file - "$APPCAST_WORK_DIR/$ARTIFACT_NAME" >/dev/null
+          # Pull every prior release's DMG so the appcast enumerates the full history.
+          # This lets beta users see the latest stable (and vice versa) instead of only
+          # whichever tag was pushed last.
+          while read -r tag; do
+            [ -z "$tag" ] && continue
+            gh release download "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --dir "$APPCAST_WORK_DIR" \
+              --pattern "*.dmg" \
+              --skip-existing || true
+          done < <(gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 --json tagName --jq '.[].tagName')
+
+          # Always include the freshly built artifact — the release-asset upload above
+          # may not be visible yet when this step runs.
+          cp -f "$ARTIFACT_PATH" "$APPCAST_WORK_DIR/$ARTIFACT_NAME"
+
+          # generate_appcast emits one <item> per .dmg, computing Sparkle EdDSA signatures
+          # from binary contents. The --download-url-prefix below is a placeholder — the
+          # Python post-process step rewrites each enclosure URL to the correct per-tag
+          # GitHub Releases path.
           echo "$SPARKLE_PRIVATE_ED_KEY" | "$SPARKLE_BIN/generate_appcast" \
             --ed-key-file - \
-            --download-url-prefix "$DOWNLOAD_PREFIX" \
+            --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/__placeholder__/" \
             "$APPCAST_WORK_DIR"
+
+          # Post-process: tag pre-release items with <sparkle:channel>beta</sparkle:channel>
+          # and rewrite each enclosure URL to releases/download/v<version>/<filename>.
+          python3 - "$APPCAST_WORK_DIR/appcast.xml" "$GITHUB_REPOSITORY" <<'PYEOF'
+          import sys
+          from xml.etree import ElementTree as ET
+
+          SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
+          ET.register_namespace("sparkle", SPARKLE_NS)
+
+          appcast_path, repo = sys.argv[1], sys.argv[2]
+          tree = ET.parse(appcast_path)
+
+          for item in tree.getroot().iter("item"):
+              short_ver = item.find(f"{{{SPARKLE_NS}}}shortVersionString")
+              if short_ver is None or not short_ver.text:
+                  continue
+              version = short_ver.text.strip()
+
+              if "-" in version and item.find(f"{{{SPARKLE_NS}}}channel") is None:
+                  channel = ET.SubElement(item, f"{{{SPARKLE_NS}}}channel")
+                  channel.text = "beta"
+
+              enclosure = item.find("enclosure")
+              if enclosure is not None:
+                  filename = enclosure.get("url", "").rsplit("/", 1)[-1]
+                  if filename:
+                      enclosure.set(
+                          "url",
+                          f"https://github.com/{repo}/releases/download/v{version}/{filename}",
+                      )
+
+          tree.write(appcast_path, xml_declaration=True, encoding="utf-8")
+          PYEOF
 
           cp "$APPCAST_WORK_DIR/appcast.xml" "$PAGES_DIR/appcast.xml"
 

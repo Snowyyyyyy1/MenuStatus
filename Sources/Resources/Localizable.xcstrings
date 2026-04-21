@@ -1888,6 +1888,40 @@
         }
       }
     },
+    "settings.updates.beta" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Receive beta updates"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接收 Beta 更新"
+          }
+        }
+      }
+    },
+    "settings.helper.updates.beta" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opt into pre-release builds tagged as beta or rc."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择接收带 beta 或 rc 标签的预发布版本。"
+          }
+        }
+      }
+    },
     "status.impact.critical" : {
       "extractionState" : "manual",
       "localizations" : {

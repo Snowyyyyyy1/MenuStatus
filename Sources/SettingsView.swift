@@ -140,7 +140,7 @@ struct SettingsView: View {
                 }
                 .tag(SettingsPane.providers)
 
-            UpdateSettingsPane(updaterService: updaterService)
+            UpdateSettingsPane(settings: settings, updaterService: updaterService)
                 .tabItem {
                     Label(SettingsCopy.paneTitle(.updates, locale: locale), systemImage: SettingsPane.updates.iconName)
                 }
@@ -424,6 +424,7 @@ private struct ProviderSettingsPane: View {
 }
 
 private struct UpdateSettingsPane: View {
+    @Bindable var settings: SettingsStore
     var updaterService: UpdaterService
 
     @Environment(\.locale) private var locale
@@ -468,6 +469,24 @@ private struct UpdateSettingsPane: View {
                     )
                 )
                 .disabled(!updaterService.isAvailable)
+
+                PreferenceToggleRow(
+                    title: AppStrings.localizedString(
+                        "settings.updates.beta",
+                        locale: locale,
+                        defaultValue: "Receive beta updates"
+                    ),
+                    subtitle: AppStrings.localizedString(
+                        "settings.helper.updates.beta",
+                        locale: locale,
+                        defaultValue: "Opt into pre-release builds tagged as beta or rc."
+                    ),
+                    binding: $settings.allowsBetaUpdates
+                )
+                .disabled(!updaterService.isAvailable)
+                .onChange(of: settings.allowsBetaUpdates) { _, _ in
+                    updaterService.checkForUpdatesInBackground()
+                }
 
                 VStack(alignment: .leading, spacing: 10) {
                     Button(
