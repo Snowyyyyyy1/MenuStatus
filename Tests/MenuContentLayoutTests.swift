@@ -220,4 +220,45 @@ final class MenuContentLayoutTests: XCTestCase {
             .immediate
         )
     }
+
+    func testPopoverOutsideClickPolicyKeepsPopoverOpenForPopoverClicks() {
+        XCTAssertFalse(
+            PopoverOutsideClickPolicy.shouldCloseForLocalMouseDown(
+                eventWindowMatchesPopover: true,
+                eventWindowMatchesStatusItem: false,
+                eventLocationInWindow: CGPoint(x: 20, y: 20),
+                statusButtonFrameInWindow: CGRect(x: 0, y: 0, width: 24, height: 22)
+            )
+        )
+    }
+
+    func testPopoverOutsideClickPolicyKeepsPopoverOpenForStatusItemClicks() {
+        XCTAssertFalse(
+            PopoverOutsideClickPolicy.shouldCloseForLocalMouseDown(
+                eventWindowMatchesPopover: false,
+                eventWindowMatchesStatusItem: true,
+                eventLocationInWindow: CGPoint(x: 10, y: 8),
+                statusButtonFrameInWindow: CGRect(x: 0, y: 0, width: 24, height: 22)
+            )
+        )
+    }
+
+    func testPopoverOutsideClickPolicyClosesForOtherLocalClicks() {
+        XCTAssertTrue(
+            PopoverOutsideClickPolicy.shouldCloseForLocalMouseDown(
+                eventWindowMatchesPopover: false,
+                eventWindowMatchesStatusItem: true,
+                eventLocationInWindow: CGPoint(x: 80, y: 8),
+                statusButtonFrameInWindow: CGRect(x: 0, y: 0, width: 24, height: 22)
+            )
+        )
+        XCTAssertTrue(
+            PopoverOutsideClickPolicy.shouldCloseForLocalMouseDown(
+                eventWindowMatchesPopover: false,
+                eventWindowMatchesStatusItem: false,
+                eventLocationInWindow: CGPoint(x: 10, y: 8),
+                statusButtonFrameInWindow: CGRect(x: 0, y: 0, width: 24, height: 22)
+            )
+        )
+    }
 }

@@ -33,6 +33,26 @@ enum PopoverResizePolicy {
     }
 }
 
+enum PopoverOutsideClickPolicy {
+    static func shouldCloseForLocalMouseDown(
+        eventWindowMatchesPopover: Bool,
+        eventWindowMatchesStatusItem: Bool,
+        eventLocationInWindow: CGPoint,
+        statusButtonFrameInWindow: CGRect
+    ) -> Bool {
+        if eventWindowMatchesPopover {
+            return false
+        }
+
+        if eventWindowMatchesStatusItem,
+           statusButtonFrameInWindow.contains(eventLocationInWindow) {
+            return false
+        }
+
+        return true
+    }
+}
+
 enum PopoverSizing {
     static let frameOverheadEstimate: CGFloat = 28
     static let anchorMargin: CGFloat = 12
@@ -136,6 +156,12 @@ final class MenuStatusAppDelegate: NSObject, NSApplicationDelegate {
 
 @MainActor
 final class StatusItemController: NSObject, NSPopoverDelegate {
+    private static let outsideClickEventMask: NSEvent.EventTypeMask = [
+        .leftMouseDown,
+        .rightMouseDown,
+        .otherMouseDown,
+    ]
+
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
     private let hostCoordinator = MenuHostCoordinator()
@@ -143,6 +169,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     private var pendingShrinkTask: Task<Void, Never>?
     private var selectionTransitionDeadline: Date?
     private var popoverFrameHeightOverhead: CGFloat = PopoverSizing.frameOverheadEstimate
+    private var globalMouseDownMonitor: Any?
+    private var localMouseDownMonitor: Any?
 
     init(store: StatusStore, benchmarkStore: AIStupidLevelStore) {
         hostingController = NSHostingController(
@@ -214,12 +242,76 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         guard let button = statusItem.button else { return }
         updateAvailablePopoverHeight(using: button)
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        installOutsideClickMonitors()
     }
 
     private func closePopover() {
         pendingShrinkTask?.cancel()
         pendingShrinkTask = nil
+        removeOutsideClickMonitors()
         popover.performClose(nil)
+    }
+
+    private func installOutsideClickMonitors() {
+        removeOutsideClickMonitors()
+
+        globalMouseDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: Self.outsideClickEventMask) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.closePopoverFromOutsideMouseDown()
+            }
+        }
+
+        localMouseDownMonitor = NSEvent.addLocalMonitorForEvents(matching: Self.outsideClickEventMask) { [weak self] event in
+            MainActor.assumeIsolated {
+                self?.handleLocalMouseDown(event)
+            }
+            return event
+        }
+    }
+
+    private func removeOutsideClickMonitors() {
+        Self.removeEventMonitor(globalMouseDownMonitor)
+        globalMouseDownMonitor = nil
+
+        Self.removeEventMonitor(localMouseDownMonitor)
+        localMouseDownMonitor = nil
+    }
+
+    nonisolated private static func removeEventMonitor(_ monitor: Any?) {
+        guard let monitor else { return }
+        NSEvent.removeMonitor(monitor)
+    }
+
+    private func closePopoverFromOutsideMouseDown() {
+        guard popover.isShown else {
+            removeOutsideClickMonitors()
+            return
+        }
+        closePopover()
+    }
+
+    private func handleLocalMouseDown(_ event: NSEvent) {
+        guard popover.isShown else {
+            removeOutsideClickMonitors()
+            return
+        }
+        guard let eventWindow = event.window else {
+            closePopover()
+            return
+        }
+
+        let popoverWindow = popover.contentViewController?.view.window
+        let statusButtonWindow = statusItem.button?.window
+        let statusButtonFrameInWindow = statusItem.button.map { $0.convert($0.bounds, to: nil) } ?? .zero
+
+        if PopoverOutsideClickPolicy.shouldCloseForLocalMouseDown(
+            eventWindowMatchesPopover: eventWindow === popoverWindow,
+            eventWindowMatchesStatusItem: eventWindow === statusButtonWindow,
+            eventLocationInWindow: event.locationInWindow,
+            statusButtonFrameInWindow: statusButtonFrameInWindow
+        ) {
+            closePopover()
+        }
     }
 
     private func updatePopoverSize(height: CGFloat) {
@@ -281,6 +373,10 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         stabilizeShownPopover()
     }
 
+    func popoverDidClose(_ notification: Notification) {
+        removeOutsideClickMonitors()
+    }
+
     private func stabilizeShownPopover() {
         hostingController.view.layoutSubtreeIfNeeded()
 
@@ -318,5 +414,11 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         let nextAvailableHeight = max(240, floor(availableHeight))
         guard hostCoordinator.availablePopoverHeight != nextAvailableHeight else { return }
         hostCoordinator.availablePopoverHeight = nextAvailableHeight
+    }
+
+    deinit {
+        pendingShrinkTask?.cancel()
+        Self.removeEventMonitor(globalMouseDownMonitor)
+        Self.removeEventMonitor(localMouseDownMonitor)
     }
 }
