@@ -4,21 +4,16 @@ import SwiftUI
 // MARK: - Date Parsing
 
 enum DateParsing {
-    private static let iso: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
-    private static let isoFallback: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f
-    }()
+    private static func makeISOFormatter(options: ISO8601DateFormatter.Options) -> ISO8601DateFormatter {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = options
+        return formatter
+    }
 
     static func parseISODate(_ s: String?) -> Date? {
         guard let s else { return nil }
-        return iso.date(from: s) ?? isoFallback.date(from: s)
+        return makeISOFormatter(options: [.withInternetDateTime, .withFractionalSeconds]).date(from: s)
+            ?? makeISOFormatter(options: [.withInternetDateTime]).date(from: s)
     }
 }
 
@@ -821,25 +816,27 @@ struct OpenAIOfficialHistoryData: Decodable {
 
     var uptimeByComponentID: [String: Double] {
         Dictionary(
-            uniqueKeysWithValues: componentUptimes.compactMap { uptime in
+            componentUptimes.compactMap { uptime in
                 guard let componentID = uptime.componentId,
                       let percentage = uptime.uptimePercent else {
                     return nil
                 }
                 return (componentID, percentage)
-            }
+            },
+            uniquingKeysWith: { _, new in new }
         )
     }
 
     var uptimeByGroupID: [String: Double] {
         Dictionary(
-            uniqueKeysWithValues: componentUptimes.compactMap { uptime in
+            componentUptimes.compactMap { uptime in
                 guard let groupID = uptime.statusPageComponentGroupId,
                       let percentage = uptime.uptimePercent else {
                     return nil
                 }
                 return (groupID, percentage)
-            }
+            },
+            uniquingKeysWith: { _, new in new }
         )
     }
 }

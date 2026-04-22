@@ -1,6 +1,10 @@
 import Foundation
 import Sparkle
 
+enum UpdaterPreferenceKeys {
+    static let allowsBetaUpdates = "AllowsBetaUpdates"
+}
+
 enum UpdaterAvailability: Equatable {
     case available
     case missingFeedURL
@@ -86,12 +90,25 @@ struct UpdaterConfiguration: Equatable {
     }
 }
 
-private final class UpdaterChannelDelegate: NSObject, SPUUpdaterDelegate {
+final class UpdaterChannelDelegate: NSObject, SPUUpdaterDelegate {
+    private let allowsBetaUpdates: @Sendable () -> Bool
+
+    init(allowsBetaUpdates: @escaping @Sendable () -> Bool = {
+        UserDefaults.standard.bool(forKey: UpdaterPreferenceKeys.allowsBetaUpdates)
+    }) {
+        self.allowsBetaUpdates = allowsBetaUpdates
+    }
+
+    var currentAllowedChannels: Set<String> {
+        allowsBetaUpdates() ? ["beta"] : []
+    }
+
     func allowedChannels(for _: SPUUpdater) -> Set<String> {
-        UserDefaults.standard.bool(forKey: "AllowsBetaUpdates") ? ["beta"] : []
+        currentAllowedChannels
     }
 }
 
+@MainActor
 @Observable final class UpdaterService {
     private let configuration: UpdaterConfiguration
     private let updaterController: SPUStandardUpdaterController?
@@ -124,7 +141,6 @@ private final class UpdaterChannelDelegate: NSObject, SPUUpdaterDelegate {
             self.startupErrorMessage = nil
         } catch {
             self.startupErrorMessage = "Sparkle failed to start in this build."
-            print("Sparkle failed to start: \(error)")
         }
     }
 
@@ -155,7 +171,7 @@ private final class UpdaterChannelDelegate: NSObject, SPUUpdaterDelegate {
     }
 
     func checkForUpdatesInBackground() {
-        guard isAvailable else { return }
+        guard canCheckForUpdates else { return }
         updater?.checkForUpdatesInBackground()
     }
 

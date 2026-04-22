@@ -89,4 +89,29 @@ final class UpdaterServiceTests: XCTestCase {
             "In-app updates are unavailable in local build products."
         )
     }
+
+    func testChannelDelegateAllowsOnlyStableByDefault() {
+        let delegate = UpdaterChannelDelegate(allowsBetaUpdates: { false })
+
+        XCTAssertEqual(delegate.currentAllowedChannels, [])
+    }
+
+    func testChannelDelegateAllowsBetaWhenPreferenceIsEnabled() {
+        let delegate = UpdaterChannelDelegate(allowsBetaUpdates: { true })
+
+        XCTAssertEqual(delegate.currentAllowedChannels, ["beta"])
+    }
+
+    @MainActor
+    func testAllowsBetaUpdatesPersistsUsingSharedPreferenceKey() {
+        let suiteName = "MenuStatus.UpdaterServiceTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let settings = SettingsStore(defaults: defaults)
+        settings.allowsBetaUpdates = true
+
+        XCTAssertTrue(defaults.bool(forKey: UpdaterPreferenceKeys.allowsBetaUpdates))
+        XCTAssertTrue(SettingsStore(defaults: defaults).allowsBetaUpdates)
+    }
 }

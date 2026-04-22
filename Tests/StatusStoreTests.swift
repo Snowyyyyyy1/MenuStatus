@@ -251,6 +251,18 @@ final class StatusStoreTests: XCTestCase {
         XCTAssertEqual(generatedAt.timeIntervalSince1970, 1_774_631_095.68, accuracy: 0.01)
     }
 
+    func testParseOpenAIOfficialHistoryHTMLKeepsLastDuplicateComponentID() throws {
+        let html = """
+        <script>self.__next_f.push([1,"3:[\\"$\\",\\"$L15\\",null,{\\"slug\\":\\"status.openai.com\\",\\"initialNow\\":{\\"isoDate\\":\\"2026-03-27T17:04:55.680Z\\"},\\"summary\\":{\\"structure\\":{\\"items\\":[{\\"group\\":{\\"id\\":\\"group-apis\\",\\"name\\":\\"APIs\\",\\"hidden\\":false,\\"display_aggregated_uptime\\":true,\\"components\\":[{\\"component_id\\":\\"comp-chat\\",\\"hidden\\":false,\\"display_uptime\\":true,\\"name\\":\\"Old Chat\\",\\"data_available_since\\":\\"2021-03-02T02:07:24.886Z\\"},{\\"component_id\\":\\"comp-chat\\",\\"hidden\\":false,\\"display_uptime\\":true,\\"name\\":\\"New Chat\\",\\"data_available_since\\":\\"2021-03-02T02:07:24.886Z\\"}]}}]}}}"])</script>
+        <script>self.__next_f.push([1,"1e:[\\"$\\",\\"$L20\\",null,{\\"summary\\":\\"$5:1:props:summary\\",\\"data\\":{\\"component_impacts\\":[{\\"component_id\\":\\"comp-chat\\",\\"start_at\\":\\"2026-03-26T21:35:24.608Z\\",\\"end_at\\":\\"2026-03-26T23:17:25.337Z\\",\\"status\\":\\"degraded_performance\\",\\"status_page_incident_id\\":\\"incident-1\\"}],\\"component_uptimes\\":[{\\"component_id\\":\\"comp-chat\\",\\"status_page_component_group_id\\":null,\\"uptime\\":\\"99.90\\"},{\\"component_id\\":\\"comp-chat\\",\\"status_page_component_group_id\\":null,\\"uptime\\":\\"99.99\\"},{\\"component_id\\":null,\\"status_page_component_group_id\\":\\"group-apis\\",\\"uptime\\":\\"99.98\\"}]}}]"])</script>
+        """
+
+        let payload = try StatusClient.parseIncidentIOHistoryHTML(Data(html.utf8))
+
+        XCTAssertEqual(payload.componentsByID["comp-chat"]?.name, "New Chat")
+        XCTAssertEqual(payload.componentsByID["comp-chat"]?.uptimePercent, 99.99)
+    }
+
     func testDerivePresentationStatePreservesExistingDerivedDataUntilInputsAreComplete() {
         let existingTimeline = makeTimeline(levels: [.operational, .operational])
         let existingSection = GroupedComponentSection(
@@ -291,7 +303,7 @@ final class StatusStoreTests: XCTestCase {
                 <div class="shared-partial uptime-90-days-wrapper">
                   <svg class="availability-time-line-graphic">
                     <rect fill="#76ad2a" class="uptime-day component-claude day-0" />
-                    <rect fill="#e04343" class="uptime-day component-claude day-1" />
+                    <rect class="uptime-day component-claude day-1" fill="#e04343" />
                   </svg>
                   <span id="uptime-percent-claude"><var data-var="uptime-percent">98.95</var></span>
                 </div>

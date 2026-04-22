@@ -352,15 +352,19 @@ final class StatusStore {
         let entries = snapshot.entries.filter { activeSet.contains($0.provider) }
         guard !entries.isEmpty else { return }
 
-        let summaries = Dictionary(uniqueKeysWithValues: entries.map { ($0.provider, $0.summary) })
+        let summaries = Dictionary(entries.map { ($0.provider, $0.summary) }, uniquingKeysWith: { _, new in new })
         let officialHistories = Dictionary(
-            uniqueKeysWithValues: entries.compactMap { entry in
+            entries.compactMap { entry in
                 entry.officialHistory.map { (entry.provider, $0) }
-            }
+            },
+            uniquingKeysWith: { _, new in new }
         )
-        let incidents = Dictionary(uniqueKeysWithValues: entries.map { ($0.provider, $0.incidents) })
-        let maintenances = Dictionary(uniqueKeysWithValues: entries.map { ($0.provider, $0.maintenances) })
-        let historyPageIncidents = Dictionary(uniqueKeysWithValues: entries.map { ($0.provider, $0.historyPageIncidents) })
+        let incidents = Dictionary(entries.map { ($0.provider, $0.incidents) }, uniquingKeysWith: { _, new in new })
+        let maintenances = Dictionary(entries.map { ($0.provider, $0.maintenances) }, uniquingKeysWith: { _, new in new })
+        let historyPageIncidents = Dictionary(
+            entries.map { ($0.provider, $0.historyPageIncidents) },
+            uniquingKeysWith: { _, new in new }
+        )
 
         let builtIncidentLookup = Self.buildIncidentLookup(
             providers: activeProviders,
@@ -673,7 +677,10 @@ extension StatusStore {
         currentSummary: StatuspageSummary
     ) -> (sections: [GroupedComponentSection], timelines: [String: ComponentTimeline]) {
         let now = snapshot.generatedAt ?? Date()
-        let summaryStatuses = Dictionary(uniqueKeysWithValues: currentSummary.components.map { ($0.id, $0.status) })
+        let summaryStatuses = Dictionary(
+            currentSummary.components.map { ($0.id, $0.status) },
+            uniquingKeysWith: { _, new in new }
+        )
 
         var timelines: [String: ComponentTimeline] = [:]
         let sections = snapshot.groups.compactMap { group -> GroupedComponentSection? in

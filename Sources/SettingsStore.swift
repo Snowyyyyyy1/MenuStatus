@@ -155,7 +155,7 @@ final class SettingsStore {
         static let removedBuiltInIDs = "removedBuiltInIDs"
         static let benchmarkSectionExpanded = "benchmarkSectionExpanded"
         static let groupExpansionOverrides = "groupExpansionOverrides"
-        static let allowsBetaUpdates = "AllowsBetaUpdates"
+        static let allowsBetaUpdates = UpdaterPreferenceKeys.allowsBetaUpdates
     }
 }
 

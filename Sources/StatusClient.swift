@@ -3,29 +3,29 @@ import Foundation
 // MARK: - Client
 
 struct StatusClient {
-    private static let decoder: JSONDecoder = {
+    private static func makeDecoder() -> JSONDecoder {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         return decoder
-    }()
+    }
 
     static func fetchSummary(for provider: ProviderConfig) async throws -> StatuspageSummary {
         let data = try await fetchData(from: provider.apiURL)
-        return try decoder.decode(StatuspageSummary.self, from: data)
+        return try makeDecoder().decode(StatuspageSummary.self, from: data)
     }
 
     static func fetchIncidents(for provider: ProviderConfig) async throws -> [Incident] {
         var components = URLComponents(url: provider.baseURL.appendingPathComponent("api/v2/incidents.json"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "per_page", value: "100")]
         let data = try await fetchData(from: components.url!)
-        let response = try decoder.decode(IncidentHistoryResponse.self, from: data)
+        let response = try makeDecoder().decode(IncidentHistoryResponse.self, from: data)
         return response.incidents
     }
 
     static func fetchScheduledMaintenances(for provider: ProviderConfig) async throws -> [Incident] {
         let url = provider.baseURL.appendingPathComponent("api/v2/scheduled-maintenances.json")
         let data = try await fetchData(from: url)
-        let response = try decoder.decode(ScheduledMaintenancesResponse.self, from: data)
+        let response = try makeDecoder().decode(ScheduledMaintenancesResponse.self, from: data)
         return response.scheduledMaintenances
     }
 
@@ -103,6 +103,7 @@ struct StatusClient {
             generatedAt = parseGeneratedAt(in: summaryBlock)
         }
 
+        let decoder = makeDecoder()
         let summary = try decoder.decode(OpenAIOfficialSummary.self, from: Data(summaryJSON.utf8))
         let historyData = try decoder.decode(OpenAIOfficialHistoryData.self, from: Data(dataJSON.utf8))
 
@@ -123,7 +124,7 @@ struct StatusClient {
             generatedAt = parseStatuspageGeneratedAt(in: html)
             componentBlocks = try extractStatuspageComponentBlocks(from: html)
         }
-        let components = Dictionary(uniqueKeysWithValues: componentBlocks.map { ($0.id, $0) })
+        let components = Dictionary(componentBlocks.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         return OfficialHistorySnapshot(generatedAt: generatedAt, groups: [], componentsByID: components, incidentNames: [:])
     }
 
@@ -173,9 +174,9 @@ struct StatusClient {
         let uptimeByComponentID = data.uptimeByComponentID
         let uptimeByGroupID = data.uptimeByGroupID
         let groupEntries = summary.structure.items.compactMap(\.group)
-        let componentsByID = Dictionary(uniqueKeysWithValues: groupEntries.flatMap { group in
+        let componentsByID = Dictionary(groupEntries.flatMap { group in
             group.components.map { ($0.componentId, $0) }
-        })
+        }, uniquingKeysWith: { _, new in new })
 
         let groups = groupEntries.map { group in
             return OfficialHistoryGroup(
@@ -187,7 +188,7 @@ struct StatusClient {
             )
         }
 
-        let mappedComponents = Dictionary(uniqueKeysWithValues: groups.flatMap { group in
+        let mappedComponents = Dictionary(groups.flatMap { group in
             group.componentIDs.compactMap { componentID -> (String, OfficialHistoryComponent)? in
                 guard let component = componentsByID[componentID] else {
                     return nil
@@ -204,7 +205,7 @@ struct StatusClient {
                 )
                 return (componentID, officialComponent)
             }
-        })
+        }, uniquingKeysWith: { _, new in new })
 
         return OfficialHistorySnapshot(generatedAt: generatedAt, groups: groups, componentsByID: mappedComponents, incidentNames: [:])
     }
@@ -247,10 +248,21 @@ struct StatusClient {
     }
 
     private static func extractStatuspageFills(from svg: String) -> [String] {
-        let regex = /<rect[^>]*\bfill="(#[0-9A-Fa-f]{6})"[^>]*class="[^"]*\buptime-day\b[^"]*\bday-([0-9]+)\b[^"]*"[^>]*\/?>/
-        let indexedFills: [(Int, String)] = svg.matches(of: regex).compactMap { match in
-            guard let day = Int(match.2) else { return nil }
-            return (day, String(match.1))
+        let rectRegex = /<rect\b[^>]*\/?>/
+        let indexedFills: [(Int, String)] = svg.matches(of: rectRegex).compactMap { match in
+            let rect = String(match.0)
+            guard let fillMatch = rect.firstMatch(of: /\bfill="(#[0-9A-Fa-f]{6})"/),
+                  let classMatch = rect.firstMatch(of: /\bclass="([^"]*)"/) else {
+                return nil
+            }
+            let className = String(classMatch.1)
+            let classes = className.split(whereSeparator: \.isWhitespace)
+            guard classes.contains(where: { $0 == "uptime-day" }),
+                  let dayMatch = className.firstMatch(of: /\bday-([0-9]+)\b/),
+                  let day = Int(dayMatch.1) else {
+                return nil
+            }
+            return (day, String(fillMatch.1))
         }
         return indexedFills.sorted { $0.0 < $1.0 }.map(\.1)
     }
@@ -285,7 +297,7 @@ struct StatusClient {
 
     private static func decodeJSONStringLiteral(_ raw: String) throws -> String {
         let wrapped = "\"\(raw)\""
-        return try decoder.decode(String.self, from: Data(wrapped.utf8))
+        return try makeDecoder().decode(String.self, from: Data(wrapped.utf8))
     }
 
     private static func extractJSONObject(after marker: String, in text: String) throws -> String {

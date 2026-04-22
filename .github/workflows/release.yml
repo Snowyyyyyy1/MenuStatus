@@ -88,12 +88,7 @@ jobs:
       - name: Detect release channel
         id: channel
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          if [[ "$VERSION" == *-* ]]; then
-            echo "prerelease=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-          fi
+          python3 Scripts/release-appcast.py classify-version "${GITHUB_REF_NAME#v}" --github-output "$GITHUB_OUTPUT"
 
       - name: Upload GitHub release asset
         uses: softprops/action-gh-release@v2
@@ -113,8 +108,10 @@ jobs:
           SPARKLE_BIN="Tuist/.build/artifacts/sparkle/Sparkle/bin"
           APPCAST_WORK_DIR="$RUNNER_TEMP/appcast"
           PAGES_DIR="$RUNNER_TEMP/pages"
+          ASSET_TAGS="$RUNNER_TEMP/asset-tags.tsv"
 
           mkdir -p "$APPCAST_WORK_DIR" "$PAGES_DIR"
+          : > "$ASSET_TAGS"
 
           # Include only the latest stable release and the latest pre-release in the appcast.
           # Sparkle's client picks the highest-version visible item — older releases add no value
@@ -135,16 +132,40 @@ jobs:
 
           while read -r tag; do
             [ -z "$tag" ] && continue
+            if [ "$tag" = "$GITHUB_REF_NAME" ]; then
+              printf '%s\t%s\n' "$ARTIFACT_NAME" "$tag" >> "$ASSET_TAGS"
+              continue
+            fi
+
+            assets="$(gh release view "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json assets \
+              --jq '.assets[].name | select(endswith(".dmg"))')"
+            if [ -z "$assets" ]; then
+              echo "No DMG asset found for release $tag."
+              exit 1
+            fi
+
             gh release download "$tag" \
               --repo "$GITHUB_REPOSITORY" \
               --dir "$APPCAST_WORK_DIR" \
               --pattern "*.dmg" \
-              --skip-existing || true
+              --skip-existing
+
+            while IFS= read -r asset; do
+              [ -z "$asset" ] && continue
+              if [ ! -f "$APPCAST_WORK_DIR/$asset" ]; then
+                echo "Expected DMG asset $asset from release $tag was not downloaded."
+                exit 1
+              fi
+              printf '%s\t%s\n' "$asset" "$tag" >> "$ASSET_TAGS"
+            done <<< "$assets"
           done < "$RUNNER_TEMP/tags.txt"
 
           # Always include the freshly built artifact — the release-asset upload above
           # may not be visible yet when this step runs.
           cp -f "$ARTIFACT_PATH" "$APPCAST_WORK_DIR/$ARTIFACT_NAME"
+          printf '%s\t%s\n' "$ARTIFACT_NAME" "$GITHUB_REF_NAME" >> "$ASSET_TAGS"
 
           # generate_appcast emits one <item> per .dmg, computing Sparkle EdDSA signatures
           # from binary contents. The --download-url-prefix below is a placeholder — the
@@ -158,39 +179,13 @@ jobs:
             --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/__placeholder__/" \
             "$APPCAST_WORK_DIR"
 
-          # Post-process: tag pre-release items with <sparkle:channel>beta</sparkle:channel>
-          # and rewrite each enclosure URL to releases/download/v<version>/<filename>.
-          python3 - "$APPCAST_WORK_DIR/appcast.xml" "$GITHUB_REPOSITORY" <<'PYEOF'
-          import sys
-          from xml.etree import ElementTree as ET
-
-          SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
-          ET.register_namespace("sparkle", SPARKLE_NS)
-
-          appcast_path, repo = sys.argv[1], sys.argv[2]
-          tree = ET.parse(appcast_path)
-
-          for item in tree.getroot().iter("item"):
-              short_ver = item.find(f"{{{SPARKLE_NS}}}shortVersionString")
-              if short_ver is None or not short_ver.text:
-                  continue
-              version = short_ver.text.strip()
-
-              if "-" in version and item.find(f"{{{SPARKLE_NS}}}channel") is None:
-                  channel = ET.SubElement(item, f"{{{SPARKLE_NS}}}channel")
-                  channel.text = "beta"
-
-              enclosure = item.find("enclosure")
-              if enclosure is not None:
-                  filename = enclosure.get("url", "").rsplit("/", 1)[-1]
-                  if filename:
-                      enclosure.set(
-                          "url",
-                          f"https://github.com/{repo}/releases/download/v{version}/{filename}",
-                      )
-
-          tree.write(appcast_path, xml_declaration=True, encoding="utf-8")
-          PYEOF
+          # Post-process: tag allowed pre-release items with <sparkle:channel>beta</sparkle:channel>,
+          # rewrite each enclosure URL using the actual release tag that provided the asset,
+          # and assert no placeholder or delta entries remain.
+          python3 Scripts/release-appcast.py postprocess \
+            --appcast "$APPCAST_WORK_DIR/appcast.xml" \
+            --repo "$GITHUB_REPOSITORY" \
+            --asset-tags "$ASSET_TAGS"
 
           cp "$APPCAST_WORK_DIR/appcast.xml" "$PAGES_DIR/appcast.xml"
 

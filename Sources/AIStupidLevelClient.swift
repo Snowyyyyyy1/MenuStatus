@@ -19,10 +19,9 @@ struct AIStupidLevelClient {
         baseURL.appendingPathComponent("models").appendingPathComponent(modelId)
     }
 
-    private static let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        return d
-    }()
+    private static func makeDecoder() -> JSONDecoder {
+        JSONDecoder()
+    }
 
     private static let session: URLSession = {
         let config = URLSessionConfiguration.default
@@ -62,7 +61,7 @@ struct AIStupidLevelClient {
 
     static func fetchModelDetail(modelId: String) async throws -> BenchmarkModelDetail {
         let data = try await fetchData(path: "/api/models/\(modelId)")
-        return try decoder.decode(BenchmarkModelDetail.self, from: data)
+        return try makeDecoder().decode(BenchmarkModelDetail.self, from: data)
     }
 
     static func fetchModelStats(
@@ -77,12 +76,12 @@ struct AIStupidLevelClient {
                 URLQueryItem(name: "sortBy", value: sortBy)
             ]
         )
-        return try decoder.decode(BenchmarkModelStats.self, from: data)
+        return try makeDecoder().decode(BenchmarkModelStats.self, from: data)
     }
 
     static func fetchModelHistory(modelId: String) async throws -> ModelHistoryPayload {
         let data = try await fetchData(path: "/api/models/\(modelId)/history")
-        return try decoder.decode(ModelHistoryPayload.self, from: data)
+        return try makeDecoder().decode(ModelHistoryPayload.self, from: data)
     }
 
     // Keep decode methods accessible for unit tests
@@ -115,15 +114,15 @@ struct AIStupidLevelClient {
     }
 
     static func decodeModelDetail(_ data: Data) throws -> BenchmarkModelDetail {
-        try decoder.decode(BenchmarkModelDetail.self, from: data)
+        try makeDecoder().decode(BenchmarkModelDetail.self, from: data)
     }
 
     static func decodeModelStats(_ data: Data) throws -> BenchmarkModelStats {
-        try decoder.decode(BenchmarkModelStats.self, from: data)
+        try makeDecoder().decode(BenchmarkModelStats.self, from: data)
     }
 
     static func decodeModelHistory(_ data: Data) throws -> ModelHistoryPayload {
-        try decoder.decode(ModelHistoryPayload.self, from: data)
+        try makeDecoder().decode(ModelHistoryPayload.self, from: data)
     }
 
     // MARK: - Private
@@ -134,7 +133,7 @@ struct AIStupidLevelClient {
     }
 
     private static func decode<R: APIResponse>(_ data: Data, as type: R.Type) throws -> R.Payload {
-        let response = try decoder.decode(R.self, from: data)
+        let response = try makeDecoder().decode(R.self, from: data)
         guard response.success else { throw AIStupidLevelClientError.apiFailure("\(R.self) success=false") }
         return response.data
     }

@@ -73,7 +73,8 @@ final class ProviderConfigStore {
     }
 
     nonisolated private static func detectPlatform(url: URL) async throws -> StatusPlatform {
-        let (data, _) = try await URLSession.shared.data(from: url)
+        let (data, response) = try await URLSession.shared.data(from: url)
+        try StatusClient.validateHTTPResponse(response, for: url)
         guard let html = String(data: data, encoding: .utf8) else {
             return .atlassianStatuspage
         }

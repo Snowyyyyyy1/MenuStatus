@@ -129,31 +129,33 @@ struct SettingsView: View {
     var body: some View {
         TabView(selection: $selectedPane) {
             GeneralSettingsPane(settings: settings, intervalOptions: intervalOptions)
+                .settingsPaneContentPadding()
                 .tabItem {
                     Label(SettingsCopy.paneTitle(.general, locale: locale), systemImage: SettingsPane.general.iconName)
                 }
                 .tag(SettingsPane.general)
 
             ProviderSettingsPane(settings: settings, store: store)
+                .settingsPaneContentPadding()
                 .tabItem {
                     Label(SettingsCopy.paneTitle(.providers, locale: locale), systemImage: SettingsPane.providers.iconName)
                 }
                 .tag(SettingsPane.providers)
 
             UpdateSettingsPane(settings: settings, updaterService: updaterService)
+                .settingsPaneContentPadding()
                 .tabItem {
                     Label(SettingsCopy.paneTitle(.updates, locale: locale), systemImage: SettingsPane.updates.iconName)
                 }
                 .tag(SettingsPane.updates)
 
             AboutSettingsPane()
+                .settingsPaneContentPadding()
                 .tabItem {
                     Label(SettingsCopy.paneTitle(.about, locale: locale), systemImage: SettingsPane.about.iconName)
                 }
                 .tag(SettingsPane.about)
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 16)
         .frame(width: contentWidth, height: contentHeight)
         .background(
             SettingsWindowAccessor { resolvedWindow in
@@ -204,6 +206,13 @@ struct SettingsView: View {
         )
         guard window.frame.size != targetFrame.size else { return }
         window.setFrame(targetFrame, display: true, animate: animate)
+    }
+}
+
+private extension View {
+    func settingsPaneContentPadding() -> some View {
+        padding(.horizontal, 24)
+            .padding(.vertical, 16)
     }
 }
 
@@ -786,7 +795,7 @@ private struct ProviderSidebarRow: View {
 
             Toggle("", isOn: settings.enabledBinding(for: provider))
                 .labelsHidden()
-                .toggleStyle(.checkbox)
+                .toggleStyle(.switch)
                 .controlSize(.small)
         }
         .contentShape(Rectangle())
