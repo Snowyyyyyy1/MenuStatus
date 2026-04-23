@@ -118,32 +118,15 @@ final class MenuChromeTests: XCTestCase {
         )
     }
 
-    func testSettingsWindowSizingKeepsWindowTopEdgeFixed() {
-        let currentFrame = NSRect(x: 120, y: 320, width: 496, height: 580)
-
-        let targetFrame = SettingsWindowSizing.targetFrame(
-            currentFrame: currentFrame,
-            targetFrameSize: NSSize(width: 720, height: 580)
-        )
-
-        XCTAssertEqual(targetFrame.origin.x, 120)
-        XCTAssertEqual(targetFrame.maxY, currentFrame.maxY)
-        XCTAssertEqual(targetFrame.width, 720)
-        XCTAssertEqual(targetFrame.height, 580)
+    func testSettingsDefaultSizeMatchesGeneralPaneContract() {
+        XCTAssertEqual(SettingsWindowMetrics.defaultContentSize.width, SettingsPane.general.preferredWidth)
+        XCTAssertEqual(SettingsWindowMetrics.defaultContentSize.height, SettingsPane.general.preferredHeight)
     }
 
-    func testSettingsWindowSizingAdjustsHeightWhilePreservingTopEdge() {
-        let currentFrame = NSRect(x: 120, y: 320, width: 496, height: 580)
-
-        let targetFrame = SettingsWindowSizing.targetFrame(
-            currentFrame: currentFrame,
-            targetFrameSize: NSSize(width: 496, height: 620)
-        )
-
-        XCTAssertEqual(targetFrame.origin.x, 120)
-        XCTAssertEqual(targetFrame.maxY, currentFrame.maxY)
-        XCTAssertEqual(targetFrame.width, 496)
-        XCTAssertEqual(targetFrame.height, 620)
+    func testSettingsProvidersPaneUsesWiderStableContentSize() {
+        XCTAssertEqual(SettingsPane.providers.preferredWidth, 720)
+        XCTAssertEqual(SettingsPane.providers.preferredHeight, SettingsPane.general.preferredHeight)
+        XCTAssertGreaterThan(SettingsPane.providers.preferredWidth, SettingsPane.general.preferredWidth)
     }
 
     func testAboutLinkDestinationsExposeExpectedURLs() {

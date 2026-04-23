@@ -80,7 +80,6 @@ struct SettingsView: View {
     @State private var selectedPane: SettingsPane = .general
     @State private var contentWidth: CGFloat = SettingsPane.general.preferredWidth
     @State private var contentHeight: CGFloat = SettingsPane.general.preferredHeight
-    @State private var window: NSWindow?
 
     private let intervalOptions: [TimeInterval] = [30, 60, 120, 300, 600]
 
@@ -113,14 +112,6 @@ struct SettingsView: View {
         .padding(.horizontal, 24)
         .padding(.vertical, 16)
         .frame(width: contentWidth, height: contentHeight)
-        .background(
-            SettingsWindowAccessor { resolvedWindow in
-                guard window !== resolvedWindow else { return }
-                window = resolvedWindow
-                configureWindowIfNeeded(resolvedWindow)
-                applyWindowSize(for: selectedPane, animate: false)
-            }
-        )
         .onAppear {
             updateLayout(for: selectedPane, animate: false)
         }
@@ -140,56 +131,6 @@ struct SettingsView: View {
             }
         } else {
             change()
-        }
-        applyWindowSize(for: pane, animate: animate)
-    }
-
-    private func configureWindowIfNeeded(_ window: NSWindow?) {
-        guard let window else { return }
-        window.contentMinSize = SettingsWindowMetrics.minContentSize
-    }
-
-    private func applyWindowSize(for pane: SettingsPane, animate: Bool) {
-        guard let window else { return }
-        configureWindowIfNeeded(window)
-        let targetContentSize = NSSize(
-            width: pane.preferredWidth,
-            height: max(pane.preferredHeight, SettingsWindowMetrics.minContentSize.height)
-        )
-        let targetFrame = SettingsWindowSizing.targetFrame(
-            currentFrame: window.frame,
-            targetFrameSize: window.frameRect(forContentRect: NSRect(origin: .zero, size: targetContentSize)).size
-        )
-        guard window.frame.size != targetFrame.size else { return }
-        window.setFrame(targetFrame, display: true, animate: animate)
-    }
-}
-
-enum SettingsWindowSizing {
-    static func targetFrame(currentFrame: NSRect, targetFrameSize: NSSize) -> NSRect {
-        NSRect(
-            x: currentFrame.origin.x,
-            y: currentFrame.maxY - targetFrameSize.height,
-            width: targetFrameSize.width,
-            height: targetFrameSize.height
-        )
-    }
-}
-
-private struct SettingsWindowAccessor: NSViewRepresentable {
-    let onResolve: (NSWindow?) -> Void
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView(frame: .zero)
-        DispatchQueue.main.async {
-            onResolve(view.window)
-        }
-        return view
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            onResolve(nsView.window)
         }
     }
 }
