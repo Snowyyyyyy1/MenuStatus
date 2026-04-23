@@ -1,4 +1,5 @@
 import AppKit
+import Observation
 import SwiftUI
 
 enum SettingsPane: CaseIterable, Identifiable {
@@ -33,6 +34,21 @@ enum SettingsPane: CaseIterable, Identifiable {
     var preferredHeight: CGFloat {
         Self.windowHeight
     }
+
+    static func windowTitleMatch(_ title: String, locale: Locale) -> Self? {
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackLocales = [
+            locale,
+            Locale(identifier: "en"),
+            Locale(identifier: "zh-Hans"),
+        ]
+
+        return allCases.first { pane in
+            fallbackLocales.contains { candidateLocale in
+                SettingsCopy.paneTitle(pane, locale: candidateLocale) == normalizedTitle
+            }
+        }
+    }
 }
 
 enum SettingsProviderSelection {
@@ -43,6 +59,12 @@ enum SettingsProviderSelection {
         }
         return current
     }
+}
+
+@MainActor
+@Observable
+final class SettingsPaneSelection {
+    var pane: SettingsPane = .general
 }
 
 enum ProviderUtilitySectionState {
@@ -75,16 +97,16 @@ struct SettingsView: View {
     @Bindable var settings: SettingsStore
     var store: StatusStore?
     var updaterService: UpdaterService
+    @Bindable var paneSelection: SettingsPaneSelection
 
     @Environment(\.locale) private var locale
-    @State private var selectedPane: SettingsPane = .general
     @State private var contentWidth: CGFloat = SettingsPane.general.preferredWidth
     @State private var contentHeight: CGFloat = SettingsPane.general.preferredHeight
 
     private let intervalOptions: [TimeInterval] = [30, 60, 120, 300, 600]
 
     var body: some View {
-        TabView(selection: $selectedPane) {
+        TabView(selection: $paneSelection.pane) {
             GeneralSettingsPane(settings: settings, intervalOptions: intervalOptions)
                 .tabItem {
                     Label(SettingsCopy.paneTitle(.general, locale: locale), systemImage: SettingsPane.general.iconName)
@@ -113,9 +135,9 @@ struct SettingsView: View {
         .padding(.vertical, 16)
         .frame(width: contentWidth, height: contentHeight)
         .onAppear {
-            updateLayout(for: selectedPane, animate: false)
+            updateLayout(for: paneSelection.pane, animate: false)
         }
-        .onChange(of: selectedPane) { _, newValue in
+        .onChange(of: paneSelection.pane) { _, newValue in
             updateLayout(for: newValue, animate: true)
         }
     }
@@ -132,6 +154,12 @@ struct SettingsView: View {
         } else {
             change()
         }
+    }
+}
+
+enum SettingsWindowContentSizing {
+    static func targetContentSize(for pane: SettingsPane) -> NSSize {
+        NSSize(width: pane.preferredWidth, height: pane.preferredHeight)
     }
 }
 

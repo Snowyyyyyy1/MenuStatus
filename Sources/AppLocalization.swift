@@ -378,9 +378,15 @@ struct LocalizedSettingsRootView: View {
     @Bindable var settings: SettingsStore
     var store: StatusStore?
     var updaterService: UpdaterService
+    @Bindable var paneSelection: SettingsPaneSelection
 
     var body: some View {
-        SettingsView(settings: settings, store: store, updaterService: updaterService)
+        SettingsView(
+            settings: settings,
+            store: store,
+            updaterService: updaterService,
+            paneSelection: paneSelection
+        )
             .environment(\.locale, settings.effectiveLocale)
     }
 }

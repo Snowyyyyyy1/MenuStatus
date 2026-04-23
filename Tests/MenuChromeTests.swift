@@ -121,12 +121,31 @@ final class MenuChromeTests: XCTestCase {
     func testSettingsDefaultSizeMatchesGeneralPaneContract() {
         XCTAssertEqual(SettingsWindowMetrics.defaultContentSize.width, SettingsPane.general.preferredWidth)
         XCTAssertEqual(SettingsWindowMetrics.defaultContentSize.height, SettingsPane.general.preferredHeight)
+        XCTAssertEqual(
+            SettingsWindowContentSizing.targetContentSize(for: .general),
+            SettingsWindowMetrics.defaultContentSize
+        )
     }
 
     func testSettingsProvidersPaneUsesWiderStableContentSize() {
         XCTAssertEqual(SettingsPane.providers.preferredWidth, 720)
         XCTAssertEqual(SettingsPane.providers.preferredHeight, SettingsPane.general.preferredHeight)
         XCTAssertGreaterThan(SettingsPane.providers.preferredWidth, SettingsPane.general.preferredWidth)
+        XCTAssertEqual(
+            SettingsWindowContentSizing.targetContentSize(for: .providers),
+            NSSize(width: 720, height: SettingsPane.general.preferredHeight)
+        )
+    }
+
+    func testSettingsPaneCanResolveWindowTitle() {
+        XCTAssertEqual(
+            SettingsPane.windowTitleMatch("Providers", locale: Locale(identifier: "en")),
+            .providers
+        )
+        XCTAssertEqual(
+            SettingsPane.windowTitleMatch("General", locale: Locale(identifier: "zh-Hans")),
+            .general
+        )
     }
 
     func testAboutLinkDestinationsExposeExpectedURLs() {

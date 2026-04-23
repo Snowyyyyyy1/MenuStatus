@@ -8,6 +8,7 @@ struct MenuStatusApp: App {
     @State private var store: StatusStore
     @State private var benchmarkStore: AIStupidLevelStore
     @State private var updaterService = UpdaterService()
+    @State private var paneSelection = SettingsPaneSelection()
 
     init() {
         let settings = SettingsStore()
@@ -35,7 +36,12 @@ struct MenuStatusApp: App {
         .windowStyle(.hiddenTitleBar)
 
         Settings {
-            LocalizedSettingsRootView(settings: settings, store: store, updaterService: updaterService)
+            LocalizedSettingsRootView(
+                settings: settings,
+                store: store,
+                updaterService: updaterService,
+                paneSelection: paneSelection
+            )
         }
         .defaultSize(
             width: SettingsWindowMetrics.defaultContentSize.width,
