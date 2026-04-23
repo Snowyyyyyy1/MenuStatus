@@ -1,52 +1,15 @@
 import AppKit
 import SwiftUI
 
-private struct LeadingTextField: NSViewRepresentable {
-    @Binding var text: String
-    var placeholder: String
-
-    func makeNSView(context: Context) -> NSTextField {
-        let field = NSTextField()
-        field.alignment = .left
-        field.isBordered = true
-        field.isBezeled = true
-        field.bezelStyle = .roundedBezel
-        field.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        field.placeholderString = placeholder
-        field.delegate = context.coordinator
-        field.lineBreakMode = .byTruncatingTail
-        field.cell?.truncatesLastVisibleLine = true
-        return field
-    }
-
-    func updateNSView(_ nsView: NSTextField, context: Context) {
-        if nsView.stringValue != text {
-            nsView.stringValue = text
-        }
-        nsView.placeholderString = placeholder
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator(self) }
-
-    final class Coordinator: NSObject, NSTextFieldDelegate {
-        let parent: LeadingTextField
-
-        init(_ parent: LeadingTextField) {
-            self.parent = parent
-        }
-
-        func controlTextDidChange(_ obj: Notification) {
-            guard let field = obj.object as? NSTextField else { return }
-            parent.text = field.stringValue
-        }
-    }
-}
-
 enum SettingsPane: CaseIterable, Identifiable {
     case general
     case providers
     case updates
     case about
+
+    static let defaultWidth: CGFloat = 496
+    static let providersWidth: CGFloat = 720
+    static let windowHeight: CGFloat = 580
 
     var id: Self { self }
 
@@ -64,16 +27,11 @@ enum SettingsPane: CaseIterable, Identifiable {
     }
 
     var preferredWidth: CGFloat {
-        switch self {
-        case .providers:
-            return 720
-        case .general, .updates, .about:
-            return 496
-        }
+        self == .providers ? Self.providersWidth : Self.defaultWidth
     }
 
     var preferredHeight: CGFloat {
-        580
+        Self.windowHeight
     }
 }
 
@@ -129,33 +87,31 @@ struct SettingsView: View {
     var body: some View {
         TabView(selection: $selectedPane) {
             GeneralSettingsPane(settings: settings, intervalOptions: intervalOptions)
-                .settingsPaneContentPadding()
                 .tabItem {
                     Label(SettingsCopy.paneTitle(.general, locale: locale), systemImage: SettingsPane.general.iconName)
                 }
                 .tag(SettingsPane.general)
 
             ProviderSettingsPane(settings: settings, store: store)
-                .settingsPaneContentPadding()
                 .tabItem {
                     Label(SettingsCopy.paneTitle(.providers, locale: locale), systemImage: SettingsPane.providers.iconName)
                 }
                 .tag(SettingsPane.providers)
 
             UpdateSettingsPane(settings: settings, updaterService: updaterService)
-                .settingsPaneContentPadding()
                 .tabItem {
                     Label(SettingsCopy.paneTitle(.updates, locale: locale), systemImage: SettingsPane.updates.iconName)
                 }
                 .tag(SettingsPane.updates)
 
             AboutSettingsPane()
-                .settingsPaneContentPadding()
                 .tabItem {
                     Label(SettingsCopy.paneTitle(.about, locale: locale), systemImage: SettingsPane.about.iconName)
                 }
                 .tag(SettingsPane.about)
         }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
         .frame(width: contentWidth, height: contentHeight)
         .background(
             SettingsWindowAccessor { resolvedWindow in
@@ -206,13 +162,6 @@ struct SettingsView: View {
         )
         guard window.frame.size != targetFrame.size else { return }
         window.setFrame(targetFrame, display: true, animate: animate)
-    }
-}
-
-private extension View {
-    func settingsPaneContentPadding() -> some View {
-        padding(.horizontal, 24)
-            .padding(.vertical, 16)
     }
 }
 
@@ -304,6 +253,7 @@ private struct GeneralSettingsPane: View {
                     .pickerStyle(.menu)
                     .fixedSize()
                     .controlSize(.small)
+                    .focusable(false)
                 }
 
                 PreferenceControlRow(
@@ -335,6 +285,7 @@ private struct GeneralSettingsPane: View {
                     .pickerStyle(.menu)
                     .fixedSize()
                     .controlSize(.small)
+                    .focusable(false)
                 }
             }
 
@@ -374,6 +325,7 @@ private struct GeneralSettingsPane: View {
                     .pickerStyle(.menu)
                     .fixedSize()
                     .controlSize(.small)
+                    .focusable(false)
                 }
             }
         }
@@ -510,6 +462,7 @@ private struct UpdateSettingsPane: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .disabled(!updaterService.isAvailable || !updaterService.canCheckForUpdates)
+                    .focusable(false)
 
                     if let diagnosticMessage = updaterService.diagnosticMessage {
                         Text(diagnosticMessage)
@@ -563,6 +516,7 @@ private struct AboutSettingsPane: View {
                     .shadow(color: iconHover ? .accentColor.opacity(0.18) : .clear, radius: 6)
             }
             .buttonStyle(.plain)
+            .focusable(false)
             .onHover { hovering in
                 withAnimation(.spring(response: 0.32, dampingFraction: 0.78)) {
                     iconHover = hovering
@@ -685,6 +639,7 @@ private struct AboutLinkRow: View {
             .foregroundColor(.accentColor)
         }
         .buttonStyle(.plain)
+        .focusable(false)
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
     }
@@ -720,6 +675,7 @@ private struct ProviderSidebarList: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .focusable(false)
 
             Divider()
 
@@ -747,7 +703,7 @@ private struct ProviderSidebarList: View {
         }
         .background(
             RoundedRectangle(cornerRadius: ProviderSettingsMetrics.sidebarCornerRadius, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.8))
+                .fill(.regularMaterial)
         )
         .overlay(
             RoundedRectangle(cornerRadius: ProviderSettingsMetrics.sidebarCornerRadius, style: .continuous)
@@ -797,6 +753,7 @@ private struct ProviderSidebarRow: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.small)
+                .focusable(false)
         }
         .contentShape(Rectangle())
         .padding(.vertical, 2)
@@ -854,17 +811,19 @@ private struct ProviderDetailView: View {
                             chinese: "显示在菜单和服务源列表中。"
                         )
                     ) {
-                        LeadingTextField(
-                            text: Binding(
-                                get: { settings.customProviderNames[provider.id] ?? "" },
-                                set: { settings.customProviderNames[provider.id] = $0 }
-                            ),
-                            placeholder: AppStrings.localizedString(
+                        TextField(
+                            AppStrings.localizedString(
                                 "settings.providers.alias.placeholder",
                                 locale: locale,
                                 defaultValue: "Alias"
+                            ),
+                            text: Binding(
+                                get: { settings.customProviderNames[provider.id] ?? "" },
+                                set: { settings.customProviderNames[provider.id] = $0 }
                             )
                         )
+                        .textFieldStyle(.roundedBorder)
+                        .font(.footnote)
                         .frame(width: 190, height: 22)
                     }
                 }
@@ -878,6 +837,7 @@ private struct ProviderDetailView: View {
                         }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+                        .focusable(false)
                     }
                 }
             }
@@ -886,7 +846,6 @@ private struct ProviderDetailView: View {
             .padding(.horizontal, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .textSelection(.enabled)
     }
 }
 
@@ -914,6 +873,7 @@ private struct ProviderDetailHeader: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.small)
+                .focusable(false)
         }
     }
 
@@ -1002,6 +962,7 @@ private struct AddProviderRow: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(!canSubmit)
+                .focusable(false)
             }
 
             if let errorMessage {
@@ -1024,6 +985,7 @@ private struct AddProviderRow: View {
                 .buttonStyle(.plain)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+                .focusable(false)
                 .help(
                     AppStrings.localizedString(
                         "settings.providers.reset.help",
@@ -1085,6 +1047,7 @@ private struct PreferenceToggleRow: View {
                     .font(.body)
             }
             .toggleStyle(.checkbox)
+            .focusable(false)
 
             if let subtitle, !subtitle.isEmpty {
                 Text(subtitle)
