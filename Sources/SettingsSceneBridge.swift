@@ -45,7 +45,9 @@ struct HiddenSettingsBridgeView: View {
                 height: SettingsSceneBridge.keepaliveSceneSize.height
             )
             .onReceive(NotificationCenter.default.publisher(for: SettingsSceneBridge.openNotification)) { _ in
-                openSettings()
+                Task { @MainActor in
+                    openSettings()
+                }
             }
             .onAppear {
                 SettingsSceneBridge.configureKeepaliveWindowIfNeeded()

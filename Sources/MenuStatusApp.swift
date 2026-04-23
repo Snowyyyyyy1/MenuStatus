@@ -8,7 +8,7 @@ struct MenuStatusApp: App {
     @State private var store: StatusStore
     @State private var benchmarkStore: AIStupidLevelStore
     @State private var updaterService = UpdaterService()
-    @State private var paneSelection = SettingsPaneSelection()
+    private let paneSelection: SettingsPaneSelection
 
     init() {
         let settings = SettingsStore()
@@ -18,9 +18,11 @@ struct MenuStatusApp: App {
         store.startPolling()
         let benchmarkStore = AIStupidLevelStore()
         benchmarkStore.startPolling(interval: 300)
+        let paneSelection = SettingsPaneSelection()
         _settings = State(initialValue: settings)
         _store = State(initialValue: store)
         _benchmarkStore = State(initialValue: benchmarkStore)
+        self.paneSelection = paneSelection
     }
 
     var body: some Scene {

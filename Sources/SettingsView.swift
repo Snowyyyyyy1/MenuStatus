@@ -93,6 +93,7 @@ enum ProviderSettingsMetrics {
     }()
 }
 
+@MainActor
 struct SettingsView: View {
     @Bindable var settings: SettingsStore
     var store: StatusStore?
@@ -102,6 +103,7 @@ struct SettingsView: View {
     @Environment(\.locale) private var locale
     @State private var contentWidth: CGFloat = SettingsPane.general.preferredWidth
     @State private var contentHeight: CGFloat = SettingsPane.general.preferredHeight
+    @State private var hostWindow: NSWindow?
 
     private let intervalOptions: [TimeInterval] = [30, 60, 120, 300, 600]
 
@@ -134,6 +136,14 @@ struct SettingsView: View {
         .padding(.horizontal, 24)
         .padding(.vertical, 16)
         .frame(width: contentWidth, height: contentHeight)
+        .background(
+            SettingsWindowAccessor { window in
+                if hostWindow !== window {
+                    hostWindow = window
+                    applyWindowSize(for: paneSelection.pane, animate: false)
+                }
+            }
+        )
         .onAppear {
             updateLayout(for: paneSelection.pane, animate: false)
         }
@@ -154,12 +164,51 @@ struct SettingsView: View {
         } else {
             change()
         }
+        applyWindowSize(for: pane, animate: animate)
+    }
+
+    private func applyWindowSize(for pane: SettingsPane, animate: Bool) {
+        guard let hostWindow else { return }
+        let targetContentSize = SettingsWindowContentSizing.targetContentSize(for: pane)
+        let currentContentRect = hostWindow.contentRect(forFrameRect: hostWindow.frame)
+        let currentContentSize = currentContentRect.size
+        guard abs(currentContentSize.width - targetContentSize.width) > 0.5 ||
+            abs(currentContentSize.height - targetContentSize.height) > 0.5
+        else {
+            return
+        }
+
+        let targetContentRect = CGRect(origin: .zero, size: targetContentSize)
+        var targetFrame = hostWindow.frameRect(forContentRect: targetContentRect)
+        targetFrame.origin = NSPoint(
+            x: hostWindow.frame.origin.x,
+            y: hostWindow.frame.maxY - targetFrame.height
+        )
+        hostWindow.setFrame(targetFrame, display: true, animate: animate)
     }
 }
 
 enum SettingsWindowContentSizing {
     static func targetContentSize(for pane: SettingsPane) -> NSSize {
         NSSize(width: pane.preferredWidth, height: pane.preferredHeight)
+    }
+}
+
+private struct SettingsWindowAccessor: NSViewRepresentable {
+    let onResolve: (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            onResolve(view.window)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            onResolve(nsView.window)
+        }
     }
 }
 
