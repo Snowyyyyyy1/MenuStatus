@@ -116,13 +116,15 @@ struct StatusClient {
 
     static func parseAtlassianStatuspageHistoryHTML(_ data: Data) throws -> OfficialHistorySnapshot {
         let generatedAt: Date?
+        let colorPalette: StatuspageColorPalette?
         let componentBlocks: [OfficialHistoryComponent]
         do {
             guard let html = String(data: data, encoding: .utf8) else {
                 throw AtlassianStatuspageParseError.invalidHTML
             }
             generatedAt = parseStatuspageGeneratedAt(in: html)
-            componentBlocks = try extractStatuspageComponentBlocks(from: html)
+            colorPalette = parseStatuspageColorPalette(in: html)
+            componentBlocks = try extractStatuspageComponentBlocks(from: html, colorPalette: colorPalette)
         }
         let components = Dictionary(componentBlocks.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         return OfficialHistorySnapshot(generatedAt: generatedAt, groups: [], componentsByID: components, incidentNames: [:])
@@ -210,18 +212,18 @@ struct StatusClient {
         return OfficialHistorySnapshot(generatedAt: generatedAt, groups: groups, componentsByID: mappedComponents, incidentNames: [:])
     }
 
-    private static func extractStatuspageComponentBlocks(from html: String) throws -> [OfficialHistoryComponent] {
+    private static func extractStatuspageComponentBlocks(from html: String, colorPalette: StatuspageColorPalette?) throws -> [OfficialHistoryComponent] {
         let marker = #"<div data-component-id=""#
         let componentRanges = allRanges(of: marker, in: html)
 
         return componentRanges.enumerated().compactMap { index, startIndex in
             let endIndex = index + 1 < componentRanges.count ? componentRanges[index + 1] : html.endIndex
             let block = String(html[startIndex..<endIndex])
-            return parseStatuspageComponentBlock(block)
+            return parseStatuspageComponentBlock(block, colorPalette: colorPalette)
         }
     }
 
-    private static func parseStatuspageComponentBlock(_ html: String) -> OfficialHistoryComponent? {
+    private static func parseStatuspageComponentBlock(_ html: String, colorPalette: StatuspageColorPalette?) -> OfficialHistoryComponent? {
         guard let componentIdMatch = html.firstMatch(of: /<div\s+data-component-id="([^"]+)"/),
               let nameMatch = html.firstMatch(of: /<span class="name">\s*(.*?)\s*<\/span>/),
               let svgMatch = html.firstMatch(of: /<svg class="availability-time-line-graphic".*?>(.*?)<\/svg>/.dotMatchesNewlines()),
@@ -233,8 +235,8 @@ struct StatusClient {
         let name = String(nameMatch.1)
         let svg = String(svgMatch.1)
 
-        let fills = extractStatuspageFills(from: svg)
-        guard !fills.isEmpty else { return nil }
+        let levels = extractStatuspageLevels(from: svg, colorPalette: colorPalette)
+        guard !levels.isEmpty else { return nil }
 
         return OfficialHistoryComponent(
             id: componentId,
@@ -243,13 +245,13 @@ struct StatusClient {
             displayUptime: true,
             dataAvailableSince: nil,
             uptimePercent: uptimePercent,
-            timelineSource: .colors(fills)
+            timelineSource: .levels(levels)
         )
     }
 
-    private static func extractStatuspageFills(from svg: String) -> [String] {
+    private static func extractStatuspageLevels(from svg: String, colorPalette: StatuspageColorPalette?) -> [TimelineDayLevel] {
         let rectRegex = /<rect\b[^>]*\/?>/
-        let indexedFills: [(Int, String)] = svg.matches(of: rectRegex).compactMap { match in
+        let indexedLevels: [(Int, TimelineDayLevel)] = svg.matches(of: rectRegex).compactMap { match in
             let rect = String(match.0)
             guard let fillMatch = rect.firstMatch(of: /\bfill="(#[0-9A-Fa-f]{6})"/),
                   let classMatch = rect.firstMatch(of: /\bclass="([^"]*)"/) else {
@@ -262,9 +264,60 @@ struct StatusClient {
                   let day = Int(dayMatch.1) else {
                 return nil
             }
-            return (day, String(fillMatch.1))
+            return (day, statuspageLevel(forFill: String(fillMatch.1), colorPalette: colorPalette))
         }
-        return indexedFills.sorted { $0.0 < $1.0 }.map(\.1)
+        return indexedLevels.sorted { $0.0 < $1.0 }.map(\.1)
+    }
+
+    private struct StatuspageColorPalette: Decodable {
+        let blue: String?
+        let green: String?
+        let noData: String?
+        let orange: String?
+        let red: String?
+        let yellow: String?
+
+        var semanticFills: [(source: String?, level: TimelineDayLevel)] {
+            [
+                (noData, .noData),
+                (green, .operational),
+                (yellow, .degraded),
+                (orange, .partialOutage),
+                (red, .majorOutage),
+                (blue, .maintenance),
+            ]
+        }
+    }
+
+    private static func parseStatuspageColorPalette(in html: String) -> StatuspageColorPalette? {
+        guard let match = html.firstMatch(of: /window\.pageColorData\s*=\s*(\{[^;]*\});/.dotMatchesNewlines()),
+              let data = String(match.1).data(using: .utf8) else {
+            return nil
+        }
+
+        return try? makeDecoder().decode(StatuspageColorPalette.self, from: data)
+    }
+
+    private static func statuspageLevel(forFill fill: String, colorPalette: StatuspageColorPalette?) -> TimelineDayLevel {
+        guard let colorPalette else {
+            return TimelineDayLevel.statuspageLevel(forFillHex: fill)
+        }
+
+        let normalizedFill = normalizedHex(fill)
+        for semanticFill in colorPalette.semanticFills {
+            guard let source = semanticFill.source,
+                  normalizedHex(source) == normalizedFill else {
+                continue
+            }
+            return semanticFill.level
+        }
+        return TimelineDayLevel.statuspageLevel(forFillHex: fill)
+    }
+
+    private static func normalizedHex(_ fill: String) -> String {
+        fill.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "#", with: "")
+            .lowercased()
     }
 
     private static func decodeHTML(_ value: String) -> String {

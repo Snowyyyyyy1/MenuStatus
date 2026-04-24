@@ -378,7 +378,7 @@ struct DayStatus: Identifiable {
     }
 }
 
-enum TimelineDayLevel: Int, Comparable {
+enum TimelineDayLevel: Int, Comparable, Codable {
     case noData
     case operational
     case degraded
@@ -411,6 +411,59 @@ enum TimelineDayLevel: Int, Comparable {
     static func < (lhs: TimelineDayLevel, rhs: TimelineDayLevel) -> Bool {
         lhs.rawValue < rhs.rawValue
     }
+
+    static func statuspageLevel(forFillHex fill: String) -> TimelineDayLevel {
+        switch normalizedHex(fill) {
+        case "b0aea5":
+            return .noData
+        case "76ad2a":
+            return .operational
+        case "f1c40f":
+            return .degraded
+        case "e67e22":
+            return .partialOutage
+        case "e74c3c":
+            return .majorOutage
+        case "2c84db":
+            return .maintenance
+        default:
+            // Fallback heuristic for custom-themed status pages
+            let (r, g, b) = rgbComponents(for: fill)
+            if isNeutralNoDataColor(r: r, g: g, b: b) {
+                return .noData
+            }
+            if r > 210 && g < 120 {
+                return .majorOutage
+            }
+            if r > 225 && g < 170 {
+                return .partialOutage
+            }
+            if r > 180 && g >= 120 {
+                return .degraded
+            }
+            return .operational
+        }
+    }
+
+    private static func isNeutralNoDataColor(r: Int, g: Int, b: Int) -> Bool {
+        let highest = max(r, max(g, b))
+        let lowest = min(r, min(g, b))
+        return highest >= 150 && highest - lowest <= 32
+    }
+
+    private static func normalizedHex(_ fill: String) -> String {
+        fill.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "#", with: "")
+            .lowercased()
+    }
+
+    private static func rgbComponents(for fill: String) -> (Int, Int, Int) {
+        let hex = normalizedHex(fill)
+        guard hex.count == 6, let value = Int(hex, radix: 16) else {
+            return (0, 0, 0)
+        }
+        return ((value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff)
+    }
 }
 
 // MARK: - Component Timeline
@@ -442,7 +495,35 @@ struct ComponentTimeline {
                 return nil
             }
             let label = formatter.string(from: date)
-            let level = timelineLevel(forFillHex: fill)
+            let level = TimelineDayLevel.statuspageLevel(forFillHex: fill)
+            return DayStatus(
+                date: date,
+                level: level,
+                tooltip: "\(label): \(title) \(level.displayName)"
+            )
+        }
+
+        return ComponentTimeline(days: days, uptimePercent: uptimePercent)
+    }
+
+    static func buildFromLevels(
+        levels: [TimelineDayLevel],
+        now: Date,
+        timeZoneIdentifier: String?,
+        title: String,
+        uptimePercent: Double
+    ) -> ComponentTimeline {
+        let calendar = configuredCalendar(timeZoneIdentifier: timeZoneIdentifier)
+        let today = calendar.startOfDay(for: now)
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.dateFormat = "M/d"
+
+        let days = levels.enumerated().compactMap { index, level -> DayStatus? in
+            guard let date = calendar.date(byAdding: .day, value: -(levels.count - 1 - index), to: today) else {
+                return nil
+            }
+            let label = formatter.string(from: date)
             return DayStatus(
                 date: date,
                 level: level,
@@ -489,6 +570,14 @@ struct ComponentTimeline {
                 title: officialComponent.name,
                 timeZoneIdentifier: timeZoneIdentifier,
                 availableSince: officialComponent.dataAvailableSince
+            )
+        case .levels(let levels):
+            buildFromLevels(
+                levels: levels,
+                now: now,
+                timeZoneIdentifier: timeZoneIdentifier,
+                title: officialComponent.name,
+                uptimePercent: officialComponent.uptimePercent ?? 0
             )
         case .colors(let fills):
             buildFromColors(
@@ -639,50 +728,6 @@ struct ComponentTimeline {
         return calendar.startOfDay(for: date)
     }
 
-    private static func timelineLevel(forFillHex fill: String) -> TimelineDayLevel {
-        switch normalizedHex(fill) {
-        case "b0aea5":
-            return .noData
-        case "76ad2a":
-            return .operational
-        case "f1c40f":
-            return .degraded
-        case "e67e22":
-            return .partialOutage
-        case "e74c3c":
-            return .majorOutage
-        case "2c84db":
-            return .maintenance
-        default:
-            // Fallback heuristic for custom-themed status pages
-            let (r, g, _) = rgbComponents(for: fill)
-            if r > 210 && g < 120 {
-                return .majorOutage
-            }
-            if r > 225 && g < 170 {
-                return .partialOutage
-            }
-            if r > 180 && g >= 120 {
-                return .degraded
-            }
-            return .operational
-        }
-    }
-
-    private static func normalizedHex(_ fill: String) -> String {
-        fill.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "#", with: "")
-            .lowercased()
-    }
-
-    private static func rgbComponents(for fill: String) -> (Int, Int, Int) {
-        let hex = normalizedHex(fill)
-        guard hex.count == 6, let value = Int(hex, radix: 16) else {
-            return (0, 0, 0)
-        }
-        return ((value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff)
-    }
-
 }
 
 struct GroupedComponentSection: Identifiable {
@@ -724,14 +769,15 @@ struct OfficialHistoryComponent: Codable {
 
 enum OfficialTimelineSource: Codable {
     case impacts([OfficialComponentImpact])
+    case levels([TimelineDayLevel])
     case colors([String])
 
     private enum CodingKeys: String, CodingKey {
-        case type, impacts, colors
+        case type, impacts, levels, colors
     }
 
     private enum SourceType: String, Codable {
-        case impacts, colors
+        case impacts, levels, colors
     }
 
     init(from decoder: Decoder) throws {
@@ -740,6 +786,8 @@ enum OfficialTimelineSource: Codable {
         switch type {
         case .impacts:
             self = .impacts(try container.decode([OfficialComponentImpact].self, forKey: .impacts))
+        case .levels:
+            self = .levels(try container.decode([TimelineDayLevel].self, forKey: .levels))
         case .colors:
             self = .colors(try container.decode([String].self, forKey: .colors))
         }
@@ -751,6 +799,9 @@ enum OfficialTimelineSource: Codable {
         case .impacts(let impacts):
             try container.encode(SourceType.impacts, forKey: .type)
             try container.encode(impacts, forKey: .impacts)
+        case .levels(let levels):
+            try container.encode(SourceType.levels, forKey: .type)
+            try container.encode(levels, forKey: .levels)
         case .colors(let colors):
             try container.encode(SourceType.colors, forKey: .type)
             try container.encode(colors, forKey: .colors)
@@ -763,17 +814,28 @@ extension OfficialHistoryComponent {
         switch timelineSource {
         case .impacts(let impacts):
             return impacts
-        case .colors:
+        case .levels, .colors:
             return []
         }
     }
 
     var fills: [String] {
         switch timelineSource {
-        case .impacts:
+        case .impacts, .levels:
             return []
         case .colors(let fills):
             return fills
+        }
+    }
+
+    var levels: [TimelineDayLevel] {
+        switch timelineSource {
+        case .impacts:
+            return []
+        case .levels(let levels):
+            return levels
+        case .colors(let fills):
+            return fills.map { TimelineDayLevel.statuspageLevel(forFillHex: $0) }
         }
     }
 }

@@ -327,7 +327,7 @@ final class StatusStoreTests: XCTestCase {
 
         XCTAssertEqual(payload.componentsByID["claude"]?.name, "claude.ai")
         XCTAssertEqual(payload.componentsByID["claude"]?.uptimePercent, 98.95)
-        XCTAssertEqual(payload.componentsByID["claude"]?.fills, ["#76ad2a", "#e04343"])
+        XCTAssertEqual(payload.componentsByID["claude"]?.levels, [.operational, .majorOutage])
         XCTAssertEqual(payload.componentsByID["code"]?.uptimePercent, 99.27)
         XCTAssertEqual(payload.generatedAt?.timeIntervalSince1970 ?? 0, 1_774_685_401, accuracy: 0.01)
     }
@@ -394,6 +394,91 @@ final class StatusStoreTests: XCTestCase {
             timeline?.days.map(\.level) ?? [],
             [TimelineDayLevel.operational, .majorOutage, .noData]
         )
+    }
+
+    func testAtlassianParserNormalizesCustomPageColors() throws {
+        let html = """
+        <html>
+          <head>
+            <meta name="issued" content="1774685401">
+            <script>
+              window.pageColorData = {"blue":"#1887FB","green":"#00B42A","no_data":"#C1C5CB","orange":"#FF8C21","red":"#F53F3F","yellow":"#FF7D00"};
+            </script>
+          </head>
+          <body>
+            <div data-component-id="minimax">
+              <span class="name">MiniMax</span>
+              <div class="shared-partial uptime-90-days-wrapper">
+                <svg class="availability-time-line-graphic">
+                  <rect fill="#C1C5CB" class="uptime-day component-minimax day-0" />
+                  <rect fill="#00B42A" class="uptime-day component-minimax day-1" />
+                  <rect fill="#FF7D00" class="uptime-day component-minimax day-2" />
+                  <rect fill="#FF8C21" class="uptime-day component-minimax day-3" />
+                  <rect fill="#F53F3F" class="uptime-day component-minimax day-4" />
+                  <rect fill="#1887FB" class="uptime-day component-minimax day-5" />
+                </svg>
+                <span id="uptime-percent-minimax"><var data-var="uptime-percent">93.84</var></span>
+              </div>
+            </div>
+          </body>
+        </html>
+        """
+        let summary = makeSummary(components: [
+            makeComponent(id: "minimax", name: "MiniMax")
+        ])
+
+        let payload = try StatusClient.parseAtlassianStatuspageHistoryHTML(Data(html.utf8))
+        let timeline = StatusStore.buildFlatTimelines(
+            snapshot: payload,
+            summary: summary
+        )["minimax"]
+
+        XCTAssertEqual(timeline?.uptimePercent, 93.84)
+        XCTAssertEqual(
+            timeline?.days.map(\.level) ?? [],
+            [
+                TimelineDayLevel.noData,
+                .operational,
+                .degraded,
+                .partialOutage,
+                .majorOutage,
+                .maintenance,
+            ]
+        )
+    }
+
+    func testBuildOfficialTimelinesTreatsNeutralGrayAsNoData() {
+        let summary = StatuspageSummary(
+            page: StatusPage(id: "page", name: "MiniMax", url: "https://status.minimaxi.com", timeZone: "Asia/Shanghai", updatedAt: nil),
+            status: OverallStatus(indicator: .none, description: "Operational"),
+            components: [makeComponent(id: "llm", name: "LLM")],
+            incidents: [],
+            scheduledMaintenances: []
+        )
+        let payload = OfficialHistorySnapshot(
+            generatedAt: Date(timeIntervalSince1970: 1774685401),
+            groups: [],
+            componentsByID: [
+                "llm": OfficialHistoryComponent(
+                    id: "llm",
+                    name: "LLM",
+                    hidden: false,
+                    displayUptime: true,
+                    dataAvailableSince: nil,
+                    uptimePercent: 0,
+                    timelineSource: .colors(["#C1C5CB"])
+                )
+            ],
+            incidentNames: [:]
+        )
+
+        let timeline = StatusStore.buildFlatTimelines(
+            snapshot: payload,
+            summary: summary
+        )["llm"]
+
+        XCTAssertEqual(timeline?.days.map(\.level) ?? [], [.noData])
+        XCTAssertEqual(timeline?.hasMeasuredDays, false)
     }
 
     func testBuildOfficialAnthropicTimelinesMarksMissingComponentAsUnavailable() {
