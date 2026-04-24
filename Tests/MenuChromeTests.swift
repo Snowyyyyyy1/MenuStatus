@@ -121,35 +121,39 @@ final class MenuChromeTests: XCTestCase {
     func testSettingsDefaultSizeMatchesGeneralPaneContract() {
         XCTAssertEqual(SettingsWindowMetrics.defaultContentSize.width, SettingsPane.general.preferredWidth)
         XCTAssertEqual(SettingsWindowMetrics.defaultContentSize.height, SettingsPane.general.preferredHeight)
-        XCTAssertEqual(
-            SettingsWindowContentSizing.targetContentSize(for: .general),
-            SettingsWindowMetrics.defaultContentSize
-        )
+        XCTAssertEqual(SettingsWindowContentSizing.targetContentWidth(for: .general), 496)
     }
 
     func testSettingsProvidersPaneUsesWiderStableContentSize() {
         XCTAssertEqual(SettingsPane.providers.preferredWidth, 720)
         XCTAssertEqual(SettingsPane.providers.preferredHeight, SettingsPane.general.preferredHeight)
         XCTAssertGreaterThan(SettingsPane.providers.preferredWidth, SettingsPane.general.preferredWidth)
-        XCTAssertEqual(
-            SettingsWindowContentSizing.targetContentSize(for: .providers),
-            NSSize(width: 720, height: SettingsPane.general.preferredHeight)
-        )
+        XCTAssertEqual(SettingsWindowContentSizing.targetContentWidth(for: .providers), 720)
     }
 
-    func testSettingsWindowSizingDetectsMeaningfulContentSizeChanges() {
+    func testSettingsWindowSizingDetectsMeaningfulContentWidthChanges() {
         XCTAssertFalse(
-            SettingsWindowContentSizing.needsResize(
-                currentContentSize: NSSize(width: 496.2, height: 580),
-                targetContentSize: SettingsWindowMetrics.defaultContentSize
+            SettingsWindowContentSizing.needsWidthResize(
+                currentContentWidth: 496.2,
+                targetContentWidth: SettingsWindowMetrics.defaultContentSize.width
             )
         )
         XCTAssertTrue(
-            SettingsWindowContentSizing.needsResize(
-                currentContentSize: SettingsWindowMetrics.defaultContentSize,
-                targetContentSize: SettingsWindowContentSizing.targetContentSize(for: .providers)
+            SettingsWindowContentSizing.needsWidthResize(
+                currentContentWidth: SettingsWindowMetrics.defaultContentSize.width,
+                targetContentWidth: SettingsWindowContentSizing.targetContentWidth(for: .providers)
             )
         )
+    }
+
+    func testSettingsWindowSizingChangesWidthOnly() {
+        let resized = SettingsWindowContentSizing.resizedContentSize(
+            currentContentSize: NSSize(width: 496, height: 668),
+            targetContentWidth: SettingsWindowContentSizing.targetContentWidth(for: .providers)
+        )
+
+        XCTAssertEqual(resized.width, SettingsPane.providers.preferredWidth)
+        XCTAssertEqual(resized.height, 668)
     }
 
     func testSettingsPaneCanResolveWindowTitle() {

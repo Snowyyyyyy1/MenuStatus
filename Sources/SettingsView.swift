@@ -169,27 +169,35 @@ struct SettingsView: View {
     private func applyWindowSize(for pane: SettingsPane, animate: Bool) {
         guard let hostWindow else { return }
 
-        let targetContentSize = SettingsWindowContentSizing.targetContentSize(for: pane)
+        let targetContentWidth = SettingsWindowContentSizing.targetContentWidth(for: pane)
         let currentContentSize = hostWindow.contentRect(forFrameRect: hostWindow.frame).size
-        guard SettingsWindowContentSizing.needsResize(
-            currentContentSize: currentContentSize,
-            targetContentSize: targetContentSize
+        guard SettingsWindowContentSizing.needsWidthResize(
+            currentContentWidth: currentContentSize.width,
+            targetContentWidth: targetContentWidth
         ) else {
             return
         }
 
-        hostWindow.setContentSize(targetContentSize)
+        hostWindow.setContentSize(
+            SettingsWindowContentSizing.resizedContentSize(
+                currentContentSize: currentContentSize,
+                targetContentWidth: targetContentWidth
+            )
+        )
     }
 }
 
 enum SettingsWindowContentSizing {
-    static func targetContentSize(for pane: SettingsPane) -> NSSize {
-        NSSize(width: pane.preferredWidth, height: pane.preferredHeight)
+    static func targetContentWidth(for pane: SettingsPane) -> CGFloat {
+        pane.preferredWidth
     }
 
-    static func needsResize(currentContentSize: NSSize, targetContentSize: NSSize) -> Bool {
-        abs(currentContentSize.width - targetContentSize.width) > 0.5 ||
-            abs(currentContentSize.height - targetContentSize.height) > 0.5
+    static func needsWidthResize(currentContentWidth: CGFloat, targetContentWidth: CGFloat) -> Bool {
+        abs(currentContentWidth - targetContentWidth) > 0.5
+    }
+
+    static func resizedContentSize(currentContentSize: NSSize, targetContentWidth: CGFloat) -> NSSize {
+        NSSize(width: targetContentWidth, height: currentContentSize.height)
     }
 
 }
