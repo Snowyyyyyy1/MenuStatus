@@ -137,6 +137,34 @@ final class MenuChromeTests: XCTestCase {
         )
     }
 
+    func testSettingsWindowSizingDetectsMeaningfulContentSizeChanges() {
+        XCTAssertFalse(
+            SettingsWindowContentSizing.needsResize(
+                currentContentSize: NSSize(width: 496.2, height: 580),
+                targetContentSize: SettingsWindowMetrics.defaultContentSize
+            )
+        )
+        XCTAssertTrue(
+            SettingsWindowContentSizing.needsResize(
+                currentContentSize: SettingsWindowMetrics.defaultContentSize,
+                targetContentSize: SettingsWindowContentSizing.targetContentSize(for: .providers)
+            )
+        )
+    }
+
+    func testSettingsWindowSizingKeepsTopEdgeFixed() {
+        let currentFrame = NSRect(x: 120, y: 320, width: 496, height: 608)
+        let targetFrame = SettingsWindowContentSizing.targetFrame(
+            currentFrame: currentFrame,
+            targetFrameSize: NSSize(width: 720, height: 608)
+        )
+
+        XCTAssertEqual(targetFrame.origin.x, currentFrame.origin.x)
+        XCTAssertEqual(targetFrame.maxY, currentFrame.maxY)
+        XCTAssertEqual(targetFrame.width, 720)
+        XCTAssertEqual(targetFrame.height, currentFrame.height)
+    }
+
     func testSettingsPaneCanResolveWindowTitle() {
         XCTAssertEqual(
             SettingsPane.windowTitleMatch("Providers", locale: Locale(identifier: "en")),

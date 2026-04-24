@@ -18,10 +18,10 @@ xcodebuild build \
     -quiet
 
 echo "==> Launching..."
-APP_PATH=$(find .build -name "MenuStatus.app" -type d | head -1)
-if [ -z "$APP_PATH" ]; then
-    echo "Error: MenuStatus.app not found in .build"
+APP_PATH=".build/Build/Products/Debug/MenuStatus.app"
+if [ ! -d "$APP_PATH" ]; then
+    echo "Error: Debug MenuStatus.app not found at $APP_PATH"
     exit 1
 fi
-"$APP_PATH/Contents/MacOS/MenuStatus" &
+open -n "$APP_PATH"
 echo "==> MenuStatus is running"
