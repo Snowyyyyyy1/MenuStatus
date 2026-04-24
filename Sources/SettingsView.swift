@@ -178,14 +178,7 @@ struct SettingsView: View {
             return
         }
 
-        let targetFrameSize = hostWindow.frameRect(
-            forContentRect: NSRect(origin: .zero, size: targetContentSize)
-        ).size
-        let targetFrame = SettingsWindowContentSizing.targetFrame(
-            currentFrame: hostWindow.frame,
-            targetFrameSize: targetFrameSize
-        )
-        hostWindow.setFrame(targetFrame, display: true, animate: animate)
+        hostWindow.setContentSize(targetContentSize)
     }
 }
 
@@ -199,14 +192,6 @@ enum SettingsWindowContentSizing {
             abs(currentContentSize.height - targetContentSize.height) > 0.5
     }
 
-    static func targetFrame(currentFrame: NSRect, targetFrameSize: NSSize) -> NSRect {
-        NSRect(
-            x: currentFrame.origin.x,
-            y: currentFrame.maxY - targetFrameSize.height,
-            width: targetFrameSize.width,
-            height: targetFrameSize.height
-        )
-    }
 }
 
 private struct SettingsWindowAccessor: NSViewRepresentable {
