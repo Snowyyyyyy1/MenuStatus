@@ -74,9 +74,16 @@ final class StatusStore {
 
     // MARK: - Polling
 
+    private static let popoverStaleThreshold: TimeInterval = 30
+
     func startPolling() {
         stopPolling()
         startNetworkMonitor()
+        startPollingLoop()
+    }
+
+    private func startPollingLoop() {
+        pollingTask?.cancel()
         pollingTask = Task {
             while !Task.isCancelled {
                 if isConnected {
@@ -90,6 +97,15 @@ final class StatusStore {
                 }
             }
         }
+    }
+
+    func refreshIfStale() async {
+        let isStale = lastRefreshed.map { now().timeIntervalSince($0) > Self.popoverStaleThreshold } ?? true
+        guard isStale else { return }
+        await refreshNow()
+        // Reset polling sleep so the next tick fires `refreshInterval` from now,
+        // not from whenever the previous tick happened — avoids back-to-back fetches.
+        startPollingLoop()
     }
 
     func stopPolling() {
@@ -128,21 +144,11 @@ final class StatusStore {
             if isConnected != connected { isConnected = connected }
             if connected, wasDisconnected {
                 if errorMessage != nil { errorMessage = nil }
-                // Cancel the polling sleep + the in-flight refresh so URLSession requests
-                // bail immediately. The new pollingTask's refreshNow waits on currentRefresh,
-                // which now resolves quickly via cancellation rather than 30s timeout.
-                pollingTask?.cancel()
+                // Cancel the in-flight refresh so URLSession requests bail immediately;
+                // startPollingLoop replaces the cancelled polling task with a fresh one
+                // whose first iteration runs refreshNow without the reconnect-race window.
                 currentRefresh?.cancel()
-                pollingTask = Task {
-                    while !Task.isCancelled {
-                        await refreshNow()
-                        do {
-                            try await Task.sleep(for: .seconds(settings.refreshInterval))
-                        } catch {
-                            if Task.isCancelled { break }
-                        }
-                    }
-                }
+                startPollingLoop()
             } else if !connected {
                 if errorMessage != nil { errorMessage = nil }
             }

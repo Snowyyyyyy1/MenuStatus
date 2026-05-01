@@ -162,8 +162,6 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
         .otherMouseDown,
     ]
 
-    private static let popoverOpenStaleThreshold: TimeInterval = 30
-
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
     private let hostCoordinator = MenuHostCoordinator()
@@ -377,21 +375,8 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
 
     func popoverDidShow(_ notification: Notification) {
         stabilizeShownPopover()
-        refreshIfStale()
-    }
-
-    private func refreshIfStale() {
-        let threshold = Self.popoverOpenStaleThreshold
-        let now = Date()
-        let providerStale = store.lastRefreshed.map { now.timeIntervalSince($0) > threshold } ?? true
-        let benchmarkStale = benchmarkStore.lastRefreshed.map { now.timeIntervalSince($0) > threshold } ?? true
-
-        if providerStale {
-            Task { [weak store] in await store?.refreshNow() }
-        }
-        if benchmarkStale {
-            Task { [weak benchmarkStore] in await benchmarkStore?.refreshNow() }
-        }
+        Task { [weak store] in await store?.refreshIfStale() }
+        Task { [weak benchmarkStore] in await benchmarkStore?.refreshIfStale() }
     }
 
     func popoverDidClose(_ notification: Notification) {
