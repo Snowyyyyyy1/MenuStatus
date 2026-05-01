@@ -55,7 +55,7 @@ final class ProviderConfigStore {
 
     nonisolated static func detect(url: URL) async throws -> ProviderConfig {
         let apiURL = url.appendingPathComponent("api/v2/summary.json")
-        let (data, response) = try await URLSession.shared.data(from: apiURL)
+        let (data, response) = try await StatusClient.session.data(from: apiURL)
         try StatusClient.validateHTTPResponse(response, for: apiURL)
 
         let decoder = JSONDecoder()
@@ -73,7 +73,7 @@ final class ProviderConfigStore {
     }
 
     nonisolated private static func detectPlatform(url: URL) async throws -> StatusPlatform {
-        let (data, response) = try await URLSession.shared.data(from: url)
+        let (data, response) = try await StatusClient.session.data(from: url)
         try StatusClient.validateHTTPResponse(response, for: url)
         guard let html = String(data: data, encoding: .utf8) else {
             return .atlassianStatuspage

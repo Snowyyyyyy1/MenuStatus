@@ -412,8 +412,15 @@ enum TimelineDayLevel: Int, Comparable, Codable {
         lhs.rawValue < rhs.rawValue
     }
 
-    static func statuspageLevel(forFillHex fill: String) -> TimelineDayLevel {
-        switch normalizedHex(fill) {
+    static func statuspageLevel(
+        forFillHex fill: String,
+        overrides: [String: TimelineDayLevel] = [:]
+    ) -> TimelineDayLevel {
+        let normalized = normalizedHex(fill)
+        if let override = overrides[normalized] {
+            return override
+        }
+        switch normalized {
         case "b0aea5":
             return .noData
         case "76ad2a":
@@ -428,7 +435,7 @@ enum TimelineDayLevel: Int, Comparable, Codable {
             return .maintenance
         default:
             // Fallback heuristic for custom-themed status pages
-            let (r, g, b) = rgbComponents(for: fill)
+            let (r, g, b) = rgbComponents(forNormalizedHex: normalized)
             if isNeutralNoDataColor(r: r, g: g, b: b) {
                 return .noData
             }
@@ -445,20 +452,19 @@ enum TimelineDayLevel: Int, Comparable, Codable {
         }
     }
 
+    static func normalizedHex(_ fill: String) -> String {
+        fill.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "#", with: "")
+            .lowercased()
+    }
+
     private static func isNeutralNoDataColor(r: Int, g: Int, b: Int) -> Bool {
         let highest = max(r, max(g, b))
         let lowest = min(r, min(g, b))
         return highest >= 150 && highest - lowest <= 32
     }
 
-    private static func normalizedHex(_ fill: String) -> String {
-        fill.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "#", with: "")
-            .lowercased()
-    }
-
-    private static func rgbComponents(for fill: String) -> (Int, Int, Int) {
-        let hex = normalizedHex(fill)
+    private static func rgbComponents(forNormalizedHex hex: String) -> (Int, Int, Int) {
         guard hex.count == 6, let value = Int(hex, radix: 16) else {
             return (0, 0, 0)
         }
@@ -475,35 +481,6 @@ struct ComponentTimeline {
 
     var hasMeasuredDays: Bool {
         days.contains { $0.level != .noData }
-    }
-
-    static func buildFromColors(
-        fills: [String],
-        now: Date,
-        timeZoneIdentifier: String?,
-        title: String,
-        uptimePercent: Double
-    ) -> ComponentTimeline {
-        let calendar = configuredCalendar(timeZoneIdentifier: timeZoneIdentifier)
-        let today = calendar.startOfDay(for: now)
-        let formatter = DateFormatter()
-        formatter.calendar = calendar
-        formatter.dateFormat = "M/d"
-
-        let days = fills.enumerated().compactMap { index, fill -> DayStatus? in
-            guard let date = calendar.date(byAdding: .day, value: -(fills.count - 1 - index), to: today) else {
-                return nil
-            }
-            let label = formatter.string(from: date)
-            let level = TimelineDayLevel.statuspageLevel(forFillHex: fill)
-            return DayStatus(
-                date: date,
-                level: level,
-                tooltip: "\(label): \(title) \(level.displayName)"
-            )
-        }
-
-        return ComponentTimeline(days: days, uptimePercent: uptimePercent)
     }
 
     static func buildFromLevels(
@@ -580,8 +557,8 @@ struct ComponentTimeline {
                 uptimePercent: officialComponent.uptimePercent ?? 0
             )
         case .colors(let fills):
-            buildFromColors(
-                fills: fills,
+            buildFromLevels(
+                levels: fills.map { TimelineDayLevel.statuspageLevel(forFillHex: $0) },
                 now: now,
                 timeZoneIdentifier: timeZoneIdentifier,
                 title: officialComponent.name,
@@ -816,15 +793,6 @@ extension OfficialHistoryComponent {
             return impacts
         case .levels, .colors:
             return []
-        }
-    }
-
-    var fills: [String] {
-        switch timelineSource {
-        case .impacts, .levels:
-            return []
-        case .colors(let fills):
-            return fills
         }
     }
 

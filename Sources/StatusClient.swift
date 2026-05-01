@@ -66,7 +66,7 @@ struct StatusClient {
         }
     }
 
-    private static let session: URLSession = {
+    static let session: URLSession = {
         let config = URLSessionConfiguration.default
         config.waitsForConnectivity = true
         config.timeoutIntervalForRequest = 15
@@ -116,15 +116,15 @@ struct StatusClient {
 
     static func parseAtlassianStatuspageHistoryHTML(_ data: Data) throws -> OfficialHistorySnapshot {
         let generatedAt: Date?
-        let colorPalette: StatuspageColorPalette?
+        let paletteOverrides: [String: TimelineDayLevel]
         let componentBlocks: [OfficialHistoryComponent]
         do {
             guard let html = String(data: data, encoding: .utf8) else {
                 throw AtlassianStatuspageParseError.invalidHTML
             }
             generatedAt = parseStatuspageGeneratedAt(in: html)
-            colorPalette = parseStatuspageColorPalette(in: html)
-            componentBlocks = try extractStatuspageComponentBlocks(from: html, colorPalette: colorPalette)
+            paletteOverrides = parseStatuspagePaletteOverrides(in: html)
+            componentBlocks = try extractStatuspageComponentBlocks(from: html, paletteOverrides: paletteOverrides)
         }
         let components = Dictionary(componentBlocks.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         return OfficialHistorySnapshot(generatedAt: generatedAt, groups: [], componentsByID: components, incidentNames: [:])
@@ -212,18 +212,24 @@ struct StatusClient {
         return OfficialHistorySnapshot(generatedAt: generatedAt, groups: groups, componentsByID: mappedComponents, incidentNames: [:])
     }
 
-    private static func extractStatuspageComponentBlocks(from html: String, colorPalette: StatuspageColorPalette?) throws -> [OfficialHistoryComponent] {
+    private static func extractStatuspageComponentBlocks(
+        from html: String,
+        paletteOverrides: [String: TimelineDayLevel]
+    ) throws -> [OfficialHistoryComponent] {
         let marker = #"<div data-component-id=""#
         let componentRanges = allRanges(of: marker, in: html)
 
         return componentRanges.enumerated().compactMap { index, startIndex in
             let endIndex = index + 1 < componentRanges.count ? componentRanges[index + 1] : html.endIndex
             let block = String(html[startIndex..<endIndex])
-            return parseStatuspageComponentBlock(block, colorPalette: colorPalette)
+            return parseStatuspageComponentBlock(block, paletteOverrides: paletteOverrides)
         }
     }
 
-    private static func parseStatuspageComponentBlock(_ html: String, colorPalette: StatuspageColorPalette?) -> OfficialHistoryComponent? {
+    private static func parseStatuspageComponentBlock(
+        _ html: String,
+        paletteOverrides: [String: TimelineDayLevel]
+    ) -> OfficialHistoryComponent? {
         guard let componentIdMatch = html.firstMatch(of: /<div\s+data-component-id="([^"]+)"/),
               let nameMatch = html.firstMatch(of: /<span class="name">\s*(.*?)\s*<\/span>/),
               let svgMatch = html.firstMatch(of: /<svg class="availability-time-line-graphic".*?>(.*?)<\/svg>/.dotMatchesNewlines()),
@@ -235,7 +241,7 @@ struct StatusClient {
         let name = String(nameMatch.1)
         let svg = String(svgMatch.1)
 
-        let levels = extractStatuspageLevels(from: svg, colorPalette: colorPalette)
+        let levels = extractStatuspageLevels(from: svg, paletteOverrides: paletteOverrides)
         guard !levels.isEmpty else { return nil }
 
         return OfficialHistoryComponent(
@@ -249,7 +255,10 @@ struct StatusClient {
         )
     }
 
-    private static func extractStatuspageLevels(from svg: String, colorPalette: StatuspageColorPalette?) -> [TimelineDayLevel] {
+    private static func extractStatuspageLevels(
+        from svg: String,
+        paletteOverrides: [String: TimelineDayLevel]
+    ) -> [TimelineDayLevel] {
         let rectRegex = /<rect\b[^>]*\/?>/
         let indexedLevels: [(Int, TimelineDayLevel)] = svg.matches(of: rectRegex).compactMap { match in
             let rect = String(match.0)
@@ -264,7 +273,11 @@ struct StatusClient {
                   let day = Int(dayMatch.1) else {
                 return nil
             }
-            return (day, statuspageLevel(forFill: String(fillMatch.1), colorPalette: colorPalette))
+            let level = TimelineDayLevel.statuspageLevel(
+                forFillHex: String(fillMatch.1),
+                overrides: paletteOverrides
+            )
+            return (day, level)
         }
         return indexedLevels.sorted { $0.0 < $1.0 }.map(\.1)
     }
@@ -276,48 +289,29 @@ struct StatusClient {
         let orange: String?
         let red: String?
         let yellow: String?
-
-        var semanticFills: [(source: String?, level: TimelineDayLevel)] {
-            [
-                (noData, .noData),
-                (green, .operational),
-                (yellow, .degraded),
-                (orange, .partialOutage),
-                (red, .majorOutage),
-                (blue, .maintenance),
-            ]
-        }
     }
 
-    private static func parseStatuspageColorPalette(in html: String) -> StatuspageColorPalette? {
+    private static func parseStatuspagePaletteOverrides(in html: String) -> [String: TimelineDayLevel] {
         guard let match = html.firstMatch(of: /window\.pageColorData\s*=\s*(\{[^;]*\});/.dotMatchesNewlines()),
-              let data = String(match.1).data(using: .utf8) else {
-            return nil
+              let data = String(match.1).data(using: .utf8),
+              let palette = try? makeDecoder().decode(StatuspageColorPalette.self, from: data) else {
+            return [:]
         }
 
-        return try? makeDecoder().decode(StatuspageColorPalette.self, from: data)
-    }
-
-    private static func statuspageLevel(forFill fill: String, colorPalette: StatuspageColorPalette?) -> TimelineDayLevel {
-        guard let colorPalette else {
-            return TimelineDayLevel.statuspageLevel(forFillHex: fill)
+        let mapping: [(String?, TimelineDayLevel)] = [
+            (palette.noData, .noData),
+            (palette.green, .operational),
+            (palette.yellow, .degraded),
+            (palette.orange, .partialOutage),
+            (palette.red, .majorOutage),
+            (palette.blue, .maintenance),
+        ]
+        var overrides: [String: TimelineDayLevel] = [:]
+        for (source, level) in mapping {
+            guard let source else { continue }
+            overrides[TimelineDayLevel.normalizedHex(source)] = level
         }
-
-        let normalizedFill = normalizedHex(fill)
-        for semanticFill in colorPalette.semanticFills {
-            guard let source = semanticFill.source,
-                  normalizedHex(source) == normalizedFill else {
-                continue
-            }
-            return semanticFill.level
-        }
-        return TimelineDayLevel.statuspageLevel(forFillHex: fill)
-    }
-
-    private static func normalizedHex(_ fill: String) -> String {
-        fill.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "#", with: "")
-            .lowercased()
+        return overrides
     }
 
     private static func decodeHTML(_ value: String) -> String {
