@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import Observation
 
 @MainActor
@@ -97,7 +98,12 @@ final class AIStupidLevelStore {
     private let now: () -> Date
     private var pollingTask: Task<Void, Never>?
     private var hoverFetchTasks: [String: Task<HoverFetchPayload, Never>] = [:]
+    private var pathMonitor: NWPathMonitor?
+    private var debounceTask: Task<Void, Never>?
+    private var currentRefresh: Task<Void, Never>?
+    private var refreshGeneration: Int = 0
     private(set) var pollInterval: TimeInterval = 300
+    private(set) var isConnected = true
 
     init(
         defaults: UserDefaults = .standard,
@@ -130,9 +136,12 @@ final class AIStupidLevelStore {
     func startPolling(interval: TimeInterval) {
         stopPolling()
         pollInterval = max(60, interval)
+        startNetworkMonitor()
         pollingTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.refreshNow()
+                if let self, self.isConnected {
+                    await self.refreshNow()
+                }
                 do {
                     try await Task.sleep(for: .seconds(self?.pollInterval ?? 300))
                 } catch {
@@ -145,6 +154,55 @@ final class AIStupidLevelStore {
     func stopPolling() {
         pollingTask?.cancel()
         pollingTask = nil
+        stopNetworkMonitor()
+    }
+
+    private func startNetworkMonitor() {
+        let monitor = NWPathMonitor()
+        pathMonitor = monitor
+        monitor.pathUpdateHandler = { [weak self] path in
+            let connected = path.status == .satisfied
+            Task { @MainActor [weak self] in
+                self?.handlePathChange(connected)
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "com.snowyy.MenuStatus.network.benchmark"))
+    }
+
+    private func stopNetworkMonitor() {
+        pathMonitor?.cancel()
+        pathMonitor = nil
+        debounceTask?.cancel()
+        debounceTask = nil
+    }
+
+    private func handlePathChange(_ connected: Bool) {
+        debounceTask?.cancel()
+        debounceTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard let self, !Task.isCancelled else { return }
+            let wasDisconnected = !self.isConnected
+            if self.isConnected != connected { self.isConnected = connected }
+            if connected, wasDisconnected {
+                if self.errorMessage != nil { self.errorMessage = nil }
+                // Same race fix as StatusStore: cancel both polling sleep and the in-flight
+                // refresh so the new polling task can immediately start a fresh refresh.
+                self.pollingTask?.cancel()
+                self.currentRefresh?.cancel()
+                self.pollingTask = Task { [weak self] in
+                    while !Task.isCancelled {
+                        await self?.refreshNow()
+                        do {
+                            try await Task.sleep(for: .seconds(self?.pollInterval ?? 300))
+                        } catch {
+                            if Task.isCancelled { break }
+                        }
+                    }
+                }
+            } else if !connected {
+                if self.errorMessage != nil { self.errorMessage = nil }
+            }
+        }
     }
 
     func refreshNow() async {
@@ -152,7 +210,26 @@ final class AIStupidLevelStore {
     }
 
     func refreshNow(fetcher: Fetcher) async {
-        guard !isLoading else { return }
+        // See StatusStore.refreshNow for the rationale — task-based queueing replaces the
+        // bool guard so the reconnect race ("new polling sees isLoading=true and bails") is gone.
+        if let inflight = currentRefresh {
+            await inflight.value
+        }
+        if Task.isCancelled { return }
+
+        refreshGeneration += 1
+        let myGeneration = refreshGeneration
+        let task = Task<Void, Never> { @MainActor in
+            await self.performRefresh(fetcher: fetcher)
+        }
+        currentRefresh = task
+        await task.value
+        if refreshGeneration == myGeneration {
+            currentRefresh = nil
+        }
+    }
+
+    private func performRefresh(fetcher: Fetcher) async {
         isLoading = true
         errorMessage = nil
 
@@ -277,7 +354,11 @@ final class AIStupidLevelStore {
     private enum PersistentCache {
         static let dashboardKey = "benchmarkDashboardSnapshot"
         static let defaultsKey = "benchmarkHoverPayloadCache"
+        // Hover cache TTL — short because hover snapshots are point-in-time peeks
         static let ttl: TimeInterval = 600
+        // Dashboard soft TTL — keep displaying so cold start / poor network has content;
+        // footer "Updated X ago" exposes staleness, popover-open refresh replaces quickly
+        static let dashboardSoftTTL: TimeInterval = 86400
         static let maxEntries = 24
     }
 
@@ -285,7 +366,7 @@ final class AIStupidLevelStore {
         guard
             let data = defaults.data(forKey: PersistentCache.dashboardKey),
             let snapshot = try? JSONDecoder().decode(PersistedDashboardSnapshot.self, from: data),
-            snapshot.cachedAt >= now().addingTimeInterval(-PersistentCache.ttl)
+            snapshot.cachedAt >= now().addingTimeInterval(-PersistentCache.dashboardSoftTTL)
         else {
             defaults.removeObject(forKey: PersistentCache.dashboardKey)
             return

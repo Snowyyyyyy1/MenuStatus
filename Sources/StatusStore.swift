@@ -49,6 +49,8 @@ final class StatusStore {
     private var groupExpansionOverrides: [String: Bool] = [:]
     private var pathMonitor: NWPathMonitor?
     private var debounceTask: Task<Void, Never>?
+    private var currentRefresh: Task<Void, Never>?
+    private var refreshGeneration: Int = 0
     private let defaults: UserDefaults
     private let now: () -> Date
     let settings: SettingsStore
@@ -123,25 +125,26 @@ final class StatusStore {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
             let wasDisconnected = !isConnected
-            isConnected = connected
-            if connected {
-                if wasDisconnected {
-                    errorMessage = nil
-                    // Cancel the polling sleep to refresh immediately
-                    pollingTask?.cancel()
-                    pollingTask = Task {
-                        while !Task.isCancelled {
-                            await refreshNow()
-                            do {
-                                try await Task.sleep(for: .seconds(settings.refreshInterval))
-                            } catch {
-                                if Task.isCancelled { break }
-                            }
+            if isConnected != connected { isConnected = connected }
+            if connected, wasDisconnected {
+                if errorMessage != nil { errorMessage = nil }
+                // Cancel the polling sleep + the in-flight refresh so URLSession requests
+                // bail immediately. The new pollingTask's refreshNow waits on currentRefresh,
+                // which now resolves quickly via cancellation rather than 30s timeout.
+                pollingTask?.cancel()
+                currentRefresh?.cancel()
+                pollingTask = Task {
+                    while !Task.isCancelled {
+                        await refreshNow()
+                        do {
+                            try await Task.sleep(for: .seconds(settings.refreshInterval))
+                        } catch {
+                            if Task.isCancelled { break }
                         }
                     }
                 }
-            } else {
-                errorMessage = nil
+            } else if !connected {
+                if errorMessage != nil { errorMessage = nil }
             }
         }
     }
@@ -172,7 +175,27 @@ final class StatusStore {
     }
 
     func refreshNow(fetcher: Fetcher) async {
-        guard !isLoading else { return }
+        // Wait for any in-flight refresh to settle (merges concurrent calls; lets cancelled
+        // tasks unwind before we start a new one — this is the fix for the reconnect race
+        // where a new polling task's refreshNow would hit `isLoading == true` and bail.
+        if let inflight = currentRefresh {
+            await inflight.value
+        }
+        if Task.isCancelled { return }
+
+        refreshGeneration += 1
+        let myGeneration = refreshGeneration
+        let task = Task<Void, Never> { @MainActor in
+            await self.performRefresh(fetcher: fetcher)
+        }
+        currentRefresh = task
+        await task.value
+        if refreshGeneration == myGeneration {
+            currentRefresh = nil
+        }
+    }
+
+    private func performRefresh(fetcher: Fetcher) async {
         isLoading = true
         errorMessage = nil
 
@@ -329,7 +352,9 @@ final class StatusStore {
 
     private enum PersistentCache {
         static let defaultsKey = "statusRawSnapshotCache"
-        static let ttl: TimeInterval = 300
+        // Soft TTL — keep showing the snapshot up to 24h so the menu has content to display
+        // on cold start / poor network. Footer "Updated X ago" surfaces the staleness.
+        static let softTTL: TimeInterval = 86400
     }
 
     private func restorePersistentSnapshot() {
@@ -342,7 +367,7 @@ final class StatusStore {
             return
         }
 
-        guard snapshot.cachedAt >= now().addingTimeInterval(-PersistentCache.ttl) else {
+        guard snapshot.cachedAt >= now().addingTimeInterval(-PersistentCache.softTTL) else {
             defaults.removeObject(forKey: PersistentCache.defaultsKey)
             return
         }
