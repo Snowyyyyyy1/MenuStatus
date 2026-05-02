@@ -363,11 +363,14 @@ final class StatusStore {
         static let softTTL: TimeInterval = 86400
     }
 
+    private static let decoder = JSONDecoder()
+    private static let encoder = JSONEncoder()
+
     private func restorePersistentSnapshot() {
         guard let providerConfigs = settings.providerConfigs else { return }
         guard
             let data = defaults.data(forKey: PersistentCache.defaultsKey),
-            let snapshot = try? JSONDecoder().decode(PersistedStatusSnapshot.self, from: data)
+            let snapshot = try? Self.decoder.decode(PersistedStatusSnapshot.self, from: data)
         else {
             defaults.removeObject(forKey: PersistentCache.defaultsKey)
             return
@@ -429,10 +432,11 @@ final class StatusStore {
         maintenances: [ProviderConfig: [Incident]],
         historyPageIncidents: [ProviderConfig: [HistoryPageIncident]]
     ) {
-        let entries = summaries.keys.sorted { $0.id < $1.id }.map { provider in
-            PersistedStatusProviderEntry(
+        let entries = summaries.keys.sorted { $0.id < $1.id }.compactMap { provider -> PersistedStatusProviderEntry? in
+            guard let summary = summaries[provider] else { return nil }
+            return PersistedStatusProviderEntry(
                 provider: provider,
-                summary: summaries[provider]!,
+                summary: summary,
                 officialHistory: officialHistories[provider],
                 incidents: incidents[provider] ?? [],
                 maintenances: maintenances[provider] ?? [],
@@ -450,7 +454,7 @@ final class StatusStore {
             lastRefreshed: lastRefreshed,
             entries: entries
         )
-        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        guard let data = try? Self.encoder.encode(snapshot) else { return }
         defaults.set(data, forKey: PersistentCache.defaultsKey)
     }
 
@@ -594,7 +598,7 @@ extension StatusStore {
         var day = startDay
 
         while day <= endDay {
-            let dayEnd = calendar.date(byAdding: .day, value: 1, to: day)!
+            guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: day) else { break }
             let effectiveStart = max(startedAt, day)
             let effectiveEnd = min(resolvedAt, dayEnd)
             let duration = effectiveEnd.timeIntervalSince(effectiveStart)
