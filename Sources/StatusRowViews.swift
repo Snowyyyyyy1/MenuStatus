@@ -247,6 +247,7 @@ struct UptimeBarView: View {
                             let count = timeline.days.count
                             guard count > 0 else { return }
                             let index = min(max(0, Int(point.x / proxy.size.width * CGFloat(count))), count - 1)
+                            guard index != hoveredDayIndex else { return }
                             let day = timeline.days[index]
                             let details = dayDetails[day.date] ?? []
                             hoveredDayIndex = index
