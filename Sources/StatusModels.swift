@@ -4,16 +4,22 @@ import SwiftUI
 // MARK: - Date Parsing
 
 enum DateParsing {
-    private static func makeISOFormatter(options: ISO8601DateFormatter.Options) -> ISO8601DateFormatter {
+    private static let formatterWithFractionalSeconds: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = options
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter
-    }
+    }()
+
+    private static let formatterWithoutFractionalSeconds: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
 
     static func parseISODate(_ s: String?) -> Date? {
         guard let s else { return nil }
-        return makeISOFormatter(options: [.withInternetDateTime, .withFractionalSeconds]).date(from: s)
-            ?? makeISOFormatter(options: [.withInternetDateTime]).date(from: s)
+        return formatterWithFractionalSeconds.date(from: s)
+            ?? formatterWithoutFractionalSeconds.date(from: s)
     }
 }
 
@@ -601,8 +607,8 @@ struct ComponentTimeline {
             }
         }
 
-        let days: [DayStatus] = (0..<numDays).reversed().map { offset in
-            let date = calendar.date(byAdding: .day, value: -offset, to: today)!
+        let days: [DayStatus] = (0..<numDays).reversed().compactMap { offset in
+            guard let date = calendar.date(byAdding: .day, value: -offset, to: today) else { return nil }
             let label = formatter.string(from: date)
 
             if let availableDate, date < availableDate {
@@ -635,8 +641,8 @@ struct ComponentTimeline {
         formatter.calendar = calendar
         formatter.dateFormat = "M/d"
 
-        let days: [DayStatus] = (0..<numDays).reversed().map { offset in
-            let date = calendar.date(byAdding: .day, value: -offset, to: today)!
+        let days: [DayStatus] = (0..<numDays).reversed().compactMap { offset in
+            guard let date = calendar.date(byAdding: .day, value: -offset, to: today) else { return nil }
             let label = formatter.string(from: date)
             let details = dayDetails[date] ?? []
             let level = details.map(\.level).max() ?? .operational
@@ -692,16 +698,18 @@ struct ComponentTimeline {
         return calendar
     }
 
-    private static func startOfDay(from startDate: String?, calendar: Calendar) -> Date? {
-        guard let startDate else { return nil }
-
+    private static let startOfDayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
 
-        guard let date = formatter.date(from: startDate) else { return nil }
+    private static func startOfDay(from startDate: String?, calendar: Calendar) -> Date? {
+        guard let startDate,
+              let date = startOfDayFormatter.date(from: startDate) else { return nil }
         return calendar.startOfDay(for: date)
     }
 
