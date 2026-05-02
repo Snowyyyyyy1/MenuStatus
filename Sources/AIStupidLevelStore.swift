@@ -367,10 +367,13 @@ final class AIStupidLevelStore {
         static let maxEntries = 24
     }
 
+    private static let decoder = JSONDecoder()
+    private static let encoder = JSONEncoder()
+
     private func restorePersistentDashboardSnapshot() {
         guard
             let data = defaults.data(forKey: PersistentCache.dashboardKey),
-            let snapshot = try? JSONDecoder().decode(PersistedDashboardSnapshot.self, from: data),
+            let snapshot = try? Self.decoder.decode(PersistedDashboardSnapshot.self, from: data),
             snapshot.cachedAt >= now().addingTimeInterval(-PersistentCache.dashboardSoftTTL)
         else {
             defaults.removeObject(forKey: PersistentCache.dashboardKey)
@@ -400,7 +403,7 @@ final class AIStupidLevelStore {
             lastRefreshed: lastRefreshed
         )
 
-        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        guard let data = try? Self.encoder.encode(snapshot) else { return }
         defaults.set(data, forKey: PersistentCache.dashboardKey)
     }
 
@@ -437,7 +440,7 @@ final class AIStupidLevelStore {
     private func loadPersistentHoverCache() -> [String: PersistedHoverCacheEntry] {
         guard
             let data = defaults.data(forKey: PersistentCache.defaultsKey),
-            let decoded = try? JSONDecoder().decode([String: PersistedHoverCacheEntry].self, from: data)
+            let decoded = try? Self.decoder.decode([String: PersistedHoverCacheEntry].self, from: data)
         else {
             return [:]
         }
@@ -460,7 +463,7 @@ final class AIStupidLevelStore {
             return
         }
 
-        guard let data = try? JSONEncoder().encode(limited) else { return }
+        guard let data = try? Self.encoder.encode(limited) else { return }
         defaults.set(data, forKey: PersistentCache.defaultsKey)
     }
 

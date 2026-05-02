@@ -58,9 +58,7 @@ final class ProviderConfigStore {
         let (data, response) = try await StatusClient.session.data(from: apiURL)
         try StatusClient.validateHTTPResponse(response, for: apiURL)
 
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        let summary = try decoder.decode(StatuspageSummary.self, from: data)
+        let summary = try StatusClient.decoder.decode(StatuspageSummary.self, from: data)
 
         let platform = try await detectPlatform(url: url)
         let id = summary.page.id
@@ -83,15 +81,18 @@ final class ProviderConfigStore {
 
     // MARK: - Persistence
 
+    private static let encoder = JSONEncoder()
+    private static let decoder = JSONDecoder()
+
     private func saveToDisk() {
         let custom = providers.filter { !$0.isBuiltIn }
-        guard let data = try? JSONEncoder().encode(custom) else { return }
+        guard let data = try? Self.encoder.encode(custom) else { return }
         try? data.write(to: fileURL, options: .atomic)
     }
 
     private func loadFromDisk() {
         guard let data = try? Data(contentsOf: fileURL),
-              let custom = try? JSONDecoder().decode([ProviderConfig].self, from: data) else {
+              let custom = try? Self.decoder.decode([ProviderConfig].self, from: data) else {
             return
         }
         for config in custom where !providers.contains(where: { $0.id == config.id }) {

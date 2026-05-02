@@ -3,29 +3,32 @@ import Foundation
 // MARK: - Client
 
 struct StatusClient {
-    private static func makeDecoder() -> JSONDecoder {
+    static let decoder: JSONDecoder = {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         return decoder
-    }
+    }()
 
     static func fetchSummary(for provider: ProviderConfig) async throws -> StatuspageSummary {
         let data = try await fetchData(from: provider.apiURL)
-        return try makeDecoder().decode(StatuspageSummary.self, from: data)
+        return try decoder.decode(StatuspageSummary.self, from: data)
     }
 
     static func fetchIncidents(for provider: ProviderConfig) async throws -> [Incident] {
         var components = URLComponents(url: provider.baseURL.appendingPathComponent("api/v2/incidents.json"), resolvingAgainstBaseURL: false)!
         components.queryItems = [URLQueryItem(name: "per_page", value: "100")]
-        let data = try await fetchData(from: components.url!)
-        let response = try makeDecoder().decode(IncidentHistoryResponse.self, from: data)
+        guard let url = components.url else {
+            throw StatusClientTransportError.invalidResponse(provider.baseURL)
+        }
+        let data = try await fetchData(from: url)
+        let response = try decoder.decode(IncidentHistoryResponse.self, from: data)
         return response.incidents
     }
 
     static func fetchScheduledMaintenances(for provider: ProviderConfig) async throws -> [Incident] {
         let url = provider.baseURL.appendingPathComponent("api/v2/scheduled-maintenances.json")
         let data = try await fetchData(from: url)
-        let response = try makeDecoder().decode(ScheduledMaintenancesResponse.self, from: data)
+        let response = try decoder.decode(ScheduledMaintenancesResponse.self, from: data)
         return response.scheduledMaintenances
     }
 
@@ -103,7 +106,6 @@ struct StatusClient {
             generatedAt = parseGeneratedAt(in: summaryBlock)
         }
 
-        let decoder = makeDecoder()
         let summary = try decoder.decode(OpenAIOfficialSummary.self, from: Data(summaryJSON.utf8))
         let historyData = try decoder.decode(OpenAIOfficialHistoryData.self, from: Data(dataJSON.utf8))
 
@@ -294,7 +296,7 @@ struct StatusClient {
     private static func parseStatuspagePaletteOverrides(in html: String) -> [String: TimelineDayLevel] {
         guard let match = html.firstMatch(of: /window\.pageColorData\s*=\s*(\{[^;]*\});/.dotMatchesNewlines()),
               let data = String(match.1).data(using: .utf8),
-              let palette = try? makeDecoder().decode(StatuspageColorPalette.self, from: data) else {
+              let palette = try? decoder.decode(StatuspageColorPalette.self, from: data) else {
             return [:]
         }
 
@@ -344,7 +346,7 @@ struct StatusClient {
 
     private static func decodeJSONStringLiteral(_ raw: String) throws -> String {
         let wrapped = "\"\(raw)\""
-        return try makeDecoder().decode(String.self, from: Data(wrapped.utf8))
+        return try decoder.decode(String.self, from: Data(wrapped.utf8))
     }
 
     private static func extractJSONObject(after marker: String, in text: String) throws -> String {
