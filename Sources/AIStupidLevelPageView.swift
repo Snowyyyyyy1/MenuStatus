@@ -374,12 +374,10 @@ private struct ModelRankingView: View {
         return sorted.filter { BenchmarkVendorPresentation.matches($0.provider, filter) }
     }
 
-    private var prefetchedModelIDs: [String] {
-        Array(filteredScores.prefix(6).map(\.id))
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let sorted = filteredScores
+        let prefetchIDs = Array(sorted.prefix(6).map(\.id))
+        return VStack(alignment: .leading, spacing: 6) {
             BenchmarkVendorTabGrid(
                 vendors: orderedVendors,
                 selectedVendor: vendorFilter,
@@ -389,7 +387,7 @@ private struct ModelRankingView: View {
                 }
             )
 
-            ForEach(Array(filteredScores.enumerated()), id: \.element.id) { rank, score in
+            ForEach(Array(sorted.enumerated()), id: \.element.id) { rank, score in
                 RankedModelRow(
                     rank: rank + 1,
                     score: score,
@@ -398,9 +396,9 @@ private struct ModelRankingView: View {
                 )
             }
         }
-        .task(id: prefetchedModelIDs) {
-            guard !prefetchedModelIDs.isEmpty else { return }
-            await benchmarkStore.prefetchHoverDataIfNeeded(modelIDs: prefetchedModelIDs)
+        .task(id: prefetchIDs) {
+            guard !prefetchIDs.isEmpty else { return }
+            await benchmarkStore.prefetchHoverDataIfNeeded(modelIDs: prefetchIDs)
         }
     }
 
