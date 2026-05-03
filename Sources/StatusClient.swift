@@ -39,12 +39,15 @@ struct StatusClient {
     }
 
     static func fetchOfficialHistory(for provider: ProviderConfig) async throws -> OfficialHistorySnapshot {
-        let data = try await fetchData(from: provider.statusPageURL)
         switch provider.platform {
         case .incidentIO:
-            var snapshot = try parseIncidentIOHistoryHTML(data)
-            // Fetch /history for incident names
-            if let historyData = try? await fetchData(from: provider.statusPageURL.appendingPathComponent("history")),
+            async let mainFetch = fetchData(from: provider.statusPageURL)
+            async let historyFetch: Data? = try? await fetchData(
+                from: provider.statusPageURL.appendingPathComponent("history")
+            )
+
+            var snapshot = try parseIncidentIOHistoryHTML(try await mainFetch)
+            if let historyData = await historyFetch,
                let names = try? parseIncidentIOIncidentNames(historyData) {
                 snapshot = OfficialHistorySnapshot(
                     generatedAt: snapshot.generatedAt,
@@ -55,6 +58,7 @@ struct StatusClient {
             }
             return snapshot
         case .atlassianStatuspage:
+            let data = try await fetchData(from: provider.statusPageURL)
             return try parseAtlassianStatuspageHistoryHTML(data)
         }
     }
