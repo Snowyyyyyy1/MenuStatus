@@ -53,25 +53,25 @@ final class ProviderConfigStore {
 
     // MARK: - Auto-detect
 
-    nonisolated static func detect(url: URL) async throws -> ProviderConfig {
+    nonisolated static func detect(url: URL, session: URLSession = StatusClient.session) async throws -> ProviderConfig {
         let apiURL = url.appendingPathComponent("api/v2/summary.json")
-        let (data, response) = try await StatusClient.session.data(from: apiURL)
-        try StatusClient.validateHTTPResponse(response, for: apiURL)
+        async let summaryFetch = session.data(from: apiURL)
+        async let platformResult = detectPlatform(url: url, session: session)
 
+        let (data, response) = try await summaryFetch
+        try StatusClient.validateHTTPResponse(response, for: apiURL)
         let summary = try StatusClient.decoder.decode(StatuspageSummary.self, from: data)
 
-        let platform = try await detectPlatform(url: url)
-        let id = summary.page.id
-        let name = summary.page.name
+        let platform = try await platformResult
 
         return ProviderConfig(
-            id: id, displayName: name,
+            id: summary.page.id, displayName: summary.page.name,
             baseURL: url, platform: platform, isBuiltIn: false
         )
     }
 
-    nonisolated private static func detectPlatform(url: URL) async throws -> StatusPlatform {
-        let (data, response) = try await StatusClient.session.data(from: url)
+    nonisolated static func detectPlatform(url: URL, session: URLSession = StatusClient.session) async throws -> StatusPlatform {
+        let (data, response) = try await session.data(from: url)
         try StatusClient.validateHTTPResponse(response, for: url)
         guard let html = String(data: data, encoding: .utf8) else {
             return .atlassianStatuspage
