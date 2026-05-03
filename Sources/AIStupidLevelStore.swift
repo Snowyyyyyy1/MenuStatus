@@ -17,6 +17,16 @@ final class AIStupidLevelStore {
         let lastRefreshed: Date?
     }
 
+    private struct DashboardPayloadFingerprint: Encodable {
+        let scores: [BenchmarkScore]
+        let globalIndex: GlobalIndex?
+        let dashboardAlerts: [DashboardAlert]
+        let batchStatus: DashboardBatchStatusData?
+        let recommendations: AnalyticsRecommendationsPayload?
+        let degradations: [AnalyticsDegradationItem]
+        let providerReliability: [ProviderReliabilityRow]
+    }
+
     private struct PersistedHoverCacheEntry: Codable {
         let cachedAt: Date
         let detail: BenchmarkModelDetail
@@ -102,6 +112,7 @@ final class AIStupidLevelStore {
     private var debounceTask: Task<Void, Never>?
     private var currentRefresh: Task<Void, Never>?
     private var refreshGeneration: Int = 0
+    private var lastPersistedDashboardFingerprint: Data?
     private(set) var pollInterval: TimeInterval = 300
     private(set) var isConnected = true
 
@@ -391,6 +402,20 @@ final class AIStupidLevelStore {
     }
 
     private func persistDashboardSnapshot() {
+        let fingerprintInput = DashboardPayloadFingerprint(
+            scores: scores,
+            globalIndex: globalIndex,
+            dashboardAlerts: dashboardAlerts,
+            batchStatus: batchStatus,
+            recommendations: recommendations,
+            degradations: degradations,
+            providerReliability: providerReliability
+        )
+        let fingerprint = try? Self.encoder.encode(fingerprintInput)
+        if let fingerprint, fingerprint == lastPersistedDashboardFingerprint {
+            return
+        }
+
         let snapshot = PersistedDashboardSnapshot(
             cachedAt: now(),
             scores: scores,
@@ -405,6 +430,7 @@ final class AIStupidLevelStore {
 
         guard let data = try? Self.encoder.encode(snapshot) else { return }
         defaults.set(data, forKey: PersistentCache.dashboardKey)
+        lastPersistedDashboardFingerprint = fingerprint
     }
 
     private func restorePersistentHoverCache() {

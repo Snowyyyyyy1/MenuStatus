@@ -51,6 +51,7 @@ final class StatusStore {
     private var debounceTask: Task<Void, Never>?
     private var currentRefresh: Task<Void, Never>?
     private var refreshGeneration: Int = 0
+    private var lastPersistedEntriesData: Data?
     private let defaults: UserDefaults
     private let now: () -> Date
     let settings: SettingsStore
@@ -446,6 +447,12 @@ final class StatusStore {
 
         guard !entries.isEmpty else {
             defaults.removeObject(forKey: PersistentCache.defaultsKey)
+            lastPersistedEntriesData = nil
+            return
+        }
+
+        let entriesData = try? Self.encoder.encode(entries)
+        if let entriesData, entriesData == lastPersistedEntriesData {
             return
         }
 
@@ -456,6 +463,7 @@ final class StatusStore {
         )
         guard let data = try? Self.encoder.encode(snapshot) else { return }
         defaults.set(data, forKey: PersistentCache.defaultsKey)
+        lastPersistedEntriesData = entriesData
     }
 
     func dayDetails(for provider: ProviderConfig, componentId: String) -> [Date: [DayIncidentDetail]] {
@@ -601,14 +609,13 @@ extension StatusStore {
             guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: day) else { break }
             let effectiveStart = max(startedAt, day)
             let effectiveEnd = min(resolvedAt, dayEnd)
-            let duration = effectiveEnd.timeIntervalSince(effectiveStart)
+            let detail = DayIncidentDetail(
+                level: level,
+                durationSeconds: max(0, effectiveEnd.timeIntervalSince(effectiveStart)),
+                incidentName: incidentName
+            )
 
             for componentId in componentIDs {
-                let detail = DayIncidentDetail(
-                    level: level,
-                    durationSeconds: max(0, duration),
-                    incidentName: incidentName
-                )
                 lookup[componentId, default: [:]][day, default: []].append(detail)
             }
 
