@@ -44,6 +44,7 @@ final class StatusStore {
     var isLoading = false
     var errorMessage: String?
     private(set) var isConnected = true
+    private var mutedSnapshots: [String: StatusIndicator] = [:]
 
     private var pollingTask: Task<Void, Never>?
     private var groupExpansionOverrides: [String: Bool] = [:]
@@ -69,7 +70,9 @@ final class StatusStore {
     }
 
     var overallIndicator: StatusIndicator {
-        let indicators = summaries.values.map(\.status.indicator)
+        let indicators = summaries
+            .filter { !settings.mutedProviderIDs.contains($0.key.id) }
+            .values.map(\.status.indicator)
         return indicators.max() ?? .none
     }
 
@@ -177,6 +180,14 @@ final class StatusStore {
         settings.groupExpansionOverrides[key] = nextValue
     }
 
+    func setMutedSnapshot(providerID: String, indicator: StatusIndicator?) {
+        if let indicator {
+            mutedSnapshots[providerID] = indicator
+        } else {
+            mutedSnapshots.removeValue(forKey: providerID)
+        }
+    }
+
     func refreshNow() async {
         await refreshNow(fetcher: .live)
     }
@@ -238,6 +249,22 @@ final class StatusStore {
             officialHistories: fetchResults.officialHistories,
             incidentLookup: builtIncidentLookup
         )
+
+        // Auto-unmute providers whose status has changed since muting
+        let existingMuted = settings.mutedProviderIDs
+        for (provider, summary) in fetchResults.summaries {
+            if existingMuted.contains(provider.id) {
+                if let snapshot = mutedSnapshots[provider.id] {
+                    if summary.status.indicator != snapshot {
+                        settings.mutedProviderIDs.remove(provider.id)
+                        mutedSnapshots.removeValue(forKey: provider.id)
+                    }
+                } else {
+                    // No snapshot yet (e.g. cache expired on restart) — seed from current state
+                    mutedSnapshots[provider.id] = summary.status.indicator
+                }
+            }
+        }
 
         summaries = fetchResults.summaries
         componentTimelines = derivedState.timelines
@@ -424,6 +451,13 @@ final class StatusStore {
         self.groupedSections = derivedState.sections
         self.incidentLookup = builtIncidentLookup
         self.lastRefreshed = snapshot.lastRefreshed
+
+        // Restore muted snapshots from cached summaries so auto-unmute works on next refresh
+        for providerID in settings.mutedProviderIDs {
+            if let summary = summaries.first(where: { $0.key.id == providerID }) {
+                mutedSnapshots[providerID] = summary.value.status.indicator
+            }
+        }
     }
 
     private func persistSnapshot(

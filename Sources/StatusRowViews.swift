@@ -46,6 +46,26 @@ struct ProviderSectionView: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(summary.status.indicator.color)
             Spacer()
+            if summary.status.indicator != .none {
+                Button {
+                    settings.toggleMute(provider)
+                    if settings.isMuted(provider) {
+                        store.setMutedSnapshot(providerID: provider.id, indicator: summary.status.indicator)
+                    } else {
+                        store.setMutedSnapshot(providerID: provider.id, indicator: nil)
+                    }
+                } label: {
+                    Image(systemName: settings.isMuted(provider) ? "bell.slash.fill" : "bell.fill")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.plain)
+                .help(
+                    settings.isMuted(provider)
+                        ? AppStrings.unmuteProviderTooltip(locale: locale)
+                        : AppStrings.muteProviderTooltip(locale: locale)
+                )
+                .modifier(FooterIconHover())
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

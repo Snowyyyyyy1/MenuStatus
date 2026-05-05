@@ -2245,6 +2245,40 @@
         }
       }
     },
+    "provider.mute" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ignore status"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "忽略此状态"
+          }
+        }
+      }
+    },
+    "provider.unmute" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unignore status"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消忽略"
+          }
+        }
+      }
+    },
     "tooltip.related" : {
       "extractionState" : "manual",
       "localizations" : {

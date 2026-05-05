@@ -946,7 +946,8 @@ private struct ProviderTabGrid: View {
                             ProviderTab(
                                 name: settings.displayName(for: provider),
                                 isSelected: activeSelection == .provider(provider),
-                                indicator: summaries[provider]?.status.indicator
+                                indicator: summaries[provider]?.status.indicator,
+                                isMuted: settings.isMuted(provider)
                             ) {
                                 onSelectProvider(provider)
                             }
@@ -998,6 +999,7 @@ struct ProviderTab: View {
     let name: String
     let isSelected: Bool
     let indicator: StatusIndicator?
+    let isMuted: Bool
     let action: () -> Void
 
     var body: some View {
@@ -1005,7 +1007,7 @@ struct ProviderTab: View {
             HStack(spacing: 5) {
                 if let indicator {
                     Circle()
-                        .fill(indicator.color)
+                        .fill(isMuted ? Color.secondary.opacity(0.5) : indicator.color)
                         .frame(width: 6, height: 6)
                 }
                 Text(name)
@@ -1019,7 +1021,7 @@ struct ProviderTab: View {
 
 // MARK: - Footer Icon Hover
 
-private struct FooterIconHover: ViewModifier {
+struct FooterIconHover: ViewModifier {
     @State private var isHovered = false
 
     func body(content: Content) -> some View {

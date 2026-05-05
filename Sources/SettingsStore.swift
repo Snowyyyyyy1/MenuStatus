@@ -64,8 +64,26 @@ final class SettingsStore {
         }
     }
 
+    var mutedProviderIDs: Set<String> {
+        didSet {
+            defaults.set(Array(mutedProviderIDs), forKey: Keys.mutedProviderIDs)
+        }
+    }
+
     var allowsBetaUpdates: Bool {
         didSet { defaults.set(allowsBetaUpdates, forKey: Keys.allowsBetaUpdates) }
+    }
+
+    func isMuted(_ provider: ProviderConfig) -> Bool {
+        mutedProviderIDs.contains(provider.id)
+    }
+
+    func toggleMute(_ provider: ProviderConfig) {
+        if mutedProviderIDs.contains(provider.id) {
+            mutedProviderIDs.remove(provider.id)
+        } else {
+            mutedProviderIDs.insert(provider.id)
+        }
     }
 
     func displayName(for provider: ProviderConfig) -> String {
@@ -115,6 +133,7 @@ final class SettingsStore {
         self.removedBuiltInIDs = Set(defaults.stringArray(forKey: Keys.removedBuiltInIDs) ?? [])
         self.benchmarkSectionExpanded = Set(defaults.stringArray(forKey: Keys.benchmarkSectionExpanded) ?? [])
         self.groupExpansionOverrides = (defaults.dictionary(forKey: Keys.groupExpansionOverrides) as? [String: Bool]) ?? [:]
+        self.mutedProviderIDs = Set(defaults.stringArray(forKey: Keys.mutedProviderIDs) ?? [])
         self.allowsBetaUpdates = defaults.bool(forKey: Keys.allowsBetaUpdates)
     }
 
@@ -155,6 +174,7 @@ final class SettingsStore {
         static let removedBuiltInIDs = "removedBuiltInIDs"
         static let benchmarkSectionExpanded = "benchmarkSectionExpanded"
         static let groupExpansionOverrides = "groupExpansionOverrides"
+        static let mutedProviderIDs = "mutedProviderIDs"
         static let allowsBetaUpdates = UpdaterPreferenceKeys.allowsBetaUpdates
     }
 }

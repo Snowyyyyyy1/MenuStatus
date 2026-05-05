@@ -308,6 +308,14 @@ enum AppStrings {
         }
     }
 
+    static func muteProviderTooltip(locale: Locale) -> String {
+        localizedString("provider.mute", locale: locale, defaultValue: "Ignore status")
+    }
+
+    static func unmuteProviderTooltip(locale: Locale) -> String {
+        localizedString("provider.unmute", locale: locale, defaultValue: "Unignore status")
+    }
+
     static func unknownLabel(locale: Locale) -> String {
         localizedString("common.unknown", locale: locale, defaultValue: "Unknown")
     }
