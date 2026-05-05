@@ -126,6 +126,14 @@ final class AIStupidLevelStore {
         restorePersistentHoverCache()
     }
 
+    deinit {
+        MainActor.assumeIsolated {
+            stopPolling()
+            for (_, task) in hoverFetchTasks { task.cancel() }
+            hoverFetchTasks.removeAll()
+        }
+    }
+
     var hasVisibleContent: Bool {
         globalIndex != nil
             || !scores.isEmpty
@@ -304,6 +312,8 @@ final class AIStupidLevelStore {
         let payload = await task.value
         hoverFetchTasks[modelId] = nil
 
+        enforceHoverCacheLimit()
+
         if let detail = payload.detail {
             modelDetailsByID[modelId] = detail
         }
@@ -314,6 +324,18 @@ final class AIStupidLevelStore {
             historyByModelID[modelId] = history
         }
         persistHoverCacheEntryIfAvailable(for: modelId)
+    }
+
+    private func enforceHoverCacheLimit() {
+        let maxEntries = PersistentCache.maxEntries
+        guard modelDetailsByID.count > maxEntries else { return }
+        let overflow = modelDetailsByID.count - maxEntries
+        let oldestKeys = Array(modelDetailsByID.keys.prefix(overflow))
+        for key in oldestKeys {
+            modelDetailsByID.removeValue(forKey: key)
+            modelStatsByModelID.removeValue(forKey: key)
+            historyByModelID.removeValue(forKey: key)
+        }
     }
 
     func prefetchHoverDataIfNeeded(modelIDs: [String], fetcher: Fetcher = .live) async {
@@ -369,13 +391,10 @@ final class AIStupidLevelStore {
 
     private enum PersistentCache {
         static let dashboardKey = "benchmarkDashboardSnapshot"
-        static let defaultsKey = "benchmarkHoverPayloadCache"
-        // Hover cache TTL — short because hover snapshots are point-in-time peeks
-        static let ttl: TimeInterval = 600
-        // Dashboard soft TTL — keep displaying so cold start / poor network has content;
-        // footer "Updated X ago" exposes staleness, popover-open refresh replaces quickly
         static let dashboardSoftTTL: TimeInterval = 86400
+        static let ttl: TimeInterval = 600
         static let maxEntries = 24
+        static let hoverCacheDefaultsKey = "benchmarkHoverPayloadCache"
     }
 
     private static let decoder = JSONDecoder()
@@ -465,7 +484,7 @@ final class AIStupidLevelStore {
 
     private func loadPersistentHoverCache() -> [String: PersistedHoverCacheEntry] {
         guard
-            let data = defaults.data(forKey: PersistentCache.defaultsKey),
+            let data = defaults.data(forKey: PersistentCache.hoverCacheDefaultsKey),
             let decoded = try? Self.decoder.decode([String: PersistedHoverCacheEntry].self, from: data)
         else {
             return [:]
@@ -485,12 +504,12 @@ final class AIStupidLevelStore {
         let limited = Dictionary(uniqueKeysWithValues: limitedSlice.map { ($0.key, $0.value) })
 
         if limited.isEmpty {
-            defaults.removeObject(forKey: PersistentCache.defaultsKey)
+            defaults.removeObject(forKey: PersistentCache.hoverCacheDefaultsKey)
             return
         }
 
         guard let data = try? Self.encoder.encode(limited) else { return }
-        defaults.set(data, forKey: PersistentCache.defaultsKey)
+        defaults.set(data, forKey: PersistentCache.hoverCacheDefaultsKey)
     }
 
     nonisolated private static func fetchAll(

@@ -69,6 +69,14 @@ final class StatusStore {
         restorePersistentSnapshot()
     }
 
+    deinit {
+        MainActor.assumeIsolated {
+            pollingTask?.cancel()
+            currentRefresh?.cancel()
+            stopNetworkMonitor()
+        }
+    }
+
     var overallIndicator: StatusIndicator {
         let indicators = summaries
             .filter { !settings.mutedProviderIDs.contains($0.key.id) }
@@ -88,16 +96,16 @@ final class StatusStore {
 
     private func startPollingLoop() {
         pollingTask?.cancel()
-        pollingTask = Task {
+        pollingTask = Task { [weak self] in
+            guard let self else { return }
             while !Task.isCancelled {
-                if isConnected {
-                    await refreshNow()
+                if self.isConnected {
+                    await self.refreshNow()
                 }
                 do {
-                    try await Task.sleep(for: .seconds(settings.refreshInterval))
+                    try await Task.sleep(for: .seconds(self.settings.refreshInterval))
                 } catch {
                     if Task.isCancelled { break }
-                    // Sleep interrupted by network change — loop continues
                 }
             }
         }
@@ -141,20 +149,17 @@ final class StatusStore {
 
     private func handlePathChange(_ connected: Bool) {
         debounceTask?.cancel()
-        debounceTask = Task {
+        debounceTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled else { return }
-            let wasDisconnected = !isConnected
-            if isConnected != connected { isConnected = connected }
+            guard let self, !Task.isCancelled else { return }
+            let wasDisconnected = !self.isConnected
+            if self.isConnected != connected { self.isConnected = connected }
             if connected, wasDisconnected {
-                if errorMessage != nil { errorMessage = nil }
-                // Cancel the in-flight refresh so URLSession requests bail immediately;
-                // startPollingLoop replaces the cancelled polling task with a fresh one
-                // whose first iteration runs refreshNow without the reconnect-race window.
-                currentRefresh?.cancel()
-                startPollingLoop()
+                if self.errorMessage != nil { self.errorMessage = nil }
+                self.currentRefresh?.cancel()
+                self.startPollingLoop()
             } else if !connected {
-                if errorMessage != nil { errorMessage = nil }
+                if self.errorMessage != nil { self.errorMessage = nil }
             }
         }
     }
@@ -386,8 +391,6 @@ final class StatusStore {
 
     private enum PersistentCache {
         static let defaultsKey = "statusRawSnapshotCache"
-        // Soft TTL — keep showing the snapshot up to 24h so the menu has content to display
-        // on cold start / poor network. Footer "Updated X ago" surfaces the staleness.
         static let softTTL: TimeInterval = 86400
     }
 
