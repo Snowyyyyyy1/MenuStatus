@@ -17,7 +17,9 @@ struct MenuStatusApp: App {
         let store = StatusStore(settings: settings)
         store.startPolling()
         let benchmarkStore = AIStupidLevelStore()
-        benchmarkStore.startPolling(interval: 300)
+        if settings.showBenchmark {
+            benchmarkStore.startPolling(interval: 300)
+        }
         let paneSelection = SettingsPaneSelection()
         _settings = State(initialValue: settings)
         _store = State(initialValue: store)
@@ -30,6 +32,13 @@ struct MenuStatusApp: App {
 
         WindowGroup(SettingsSceneBridge.keepaliveWindowTitle) {
             HiddenSettingsBridgeView()
+                .onChange(of: settings.showBenchmark) { _, show in
+                    if show {
+                        benchmarkStore.startPolling(interval: 300)
+                    } else {
+                        benchmarkStore.stopPolling()
+                    }
+                }
         }
         .defaultSize(
             width: SettingsSceneBridge.keepaliveSceneSize.width,

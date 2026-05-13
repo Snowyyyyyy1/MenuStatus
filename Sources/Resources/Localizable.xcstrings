@@ -2295,6 +2295,40 @@
           }
         }
       }
+    },
+    "settings.benchmark.show" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show Benchmark"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示 Benchmark"
+          }
+        }
+      }
+    },
+    "settings.helper.benchmark" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Show AI Stupid Level benchmark in the menu."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在菜单中显示 AI Stupid Level 评测数据。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

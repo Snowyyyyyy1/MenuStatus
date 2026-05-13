@@ -74,6 +74,10 @@ final class SettingsStore {
         didSet { defaults.set(allowsBetaUpdates, forKey: Keys.allowsBetaUpdates) }
     }
 
+    var showBenchmark: Bool {
+        didSet { defaults.set(showBenchmark, forKey: Keys.showBenchmark) }
+    }
+
     func isMuted(_ provider: ProviderConfig) -> Bool {
         mutedProviderIDs.contains(provider.id)
     }
@@ -135,6 +139,7 @@ final class SettingsStore {
         self.groupExpansionOverrides = (defaults.dictionary(forKey: Keys.groupExpansionOverrides) as? [String: Bool]) ?? [:]
         self.mutedProviderIDs = Set(defaults.stringArray(forKey: Keys.mutedProviderIDs) ?? [])
         self.allowsBetaUpdates = defaults.bool(forKey: Keys.allowsBetaUpdates)
+        self.showBenchmark = defaults.object(forKey: Keys.showBenchmark) as? Bool ?? true
     }
 
     func attachProviderConfigs(_ store: ProviderConfigStore) {
@@ -176,6 +181,7 @@ final class SettingsStore {
         static let groupExpansionOverrides = "groupExpansionOverrides"
         static let mutedProviderIDs = "mutedProviderIDs"
         static let allowsBetaUpdates = UpdaterPreferenceKeys.allowsBetaUpdates
+        static let showBenchmark = "showBenchmark"
     }
 }
 

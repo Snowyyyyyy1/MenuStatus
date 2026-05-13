@@ -313,6 +313,20 @@ private struct GeneralSettingsPane: View {
                     .controlSize(.small)
                     .focusable(false)
                 }
+
+                PreferenceToggleRow(
+                    title: AppStrings.localizedString(
+                        "settings.benchmark.show",
+                        locale: locale,
+                        defaultValue: "Show Benchmark"
+                    ),
+                    subtitle: AppStrings.localizedString(
+                        "settings.helper.benchmark",
+                        locale: locale,
+                        defaultValue: "Show AI Stupid Level benchmark in the menu."
+                    ),
+                    binding: $settings.showBenchmark
+                )
             }
 
             Divider()

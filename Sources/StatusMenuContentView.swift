@@ -312,7 +312,7 @@ struct StatusMenuContentView: View {
             switch selection {
             case .provider(let p) where enabledProviders.contains(p):
                 return selection
-            case .benchmark:
+            case .benchmark where store.settings.showBenchmark:
                 return selection
             default:
                 break
@@ -409,6 +409,7 @@ struct StatusMenuContentView: View {
                     activeSelection: activeSelection,
                     summaries: store.summaries,
                     settings: store.settings,
+                    showBenchmark: store.settings.showBenchmark,
                     onSelectProvider: { provider in
                         selection = .provider(provider)
                     },
@@ -561,6 +562,13 @@ struct StatusMenuContentView: View {
             }
             guard height > 0 else { return }
             hostCoordinator.requestPopoverResize(height)
+        }
+        .onChange(of: store.settings.showBenchmark) { _, show in
+            if !show, case .benchmark = activeSelection {
+                if let first = enabledProviders.first {
+                    selection = .provider(first)
+                }
+            }
         }
         .overlay(alignment: .topLeading) {
             if case .benchmark = activeSelection,
@@ -755,10 +763,12 @@ struct StatusMenuContentView: View {
     private func refreshVisibleContent() async {
         async let providerRefresh: Void = store.refreshNow()
         switch activeSelection {
-        case .benchmark:
+        case .benchmark where store.settings.showBenchmark:
             async let benchmarkRefresh: Void = benchmarkStore.refreshNow()
             _ = await (providerRefresh, benchmarkRefresh)
         case .provider:
+            _ = await providerRefresh
+        default:
             _ = await providerRefresh
         }
     }
@@ -901,6 +911,7 @@ private struct ProviderTabGrid: View {
     let activeSelection: MenuSelection
     let summaries: [ProviderConfig: StatuspageSummary]
     let settings: SettingsStore
+    let showBenchmark: Bool
     let onSelectProvider: (ProviderConfig) -> Void
     let onSelectBenchmark: () -> Void
 
@@ -922,11 +933,14 @@ private struct ProviderTabGrid: View {
                 hasLeadingDot: summaries[provider]?.status.indicator != nil
             )
         }
-        let benchmarkWidth = MenuTabGridLayout.tabContentWidth(
-            text: benchmarkLabel,
-            leadingIconWidth: MenuTabGridLayout.statusDotWidth + 4
-        )
-        let combinedWidths = providerWidths + [benchmarkWidth]
+        let combinedWidths: [CGFloat] = showBenchmark
+            ? providerWidths + [
+                MenuTabGridLayout.tabContentWidth(
+                    text: benchmarkLabel,
+                    leadingIconWidth: MenuTabGridLayout.statusDotWidth + 4
+                )
+              ]
+            : providerWidths
         let plan = MenuTabGridLayout.resolveLayout(
             widths: combinedWidths,
             availableWidth: availableWidth
@@ -958,17 +972,19 @@ private struct ProviderTabGrid: View {
                 }
             }
 
-            Divider()
-                .padding(.vertical, 2)
+            if showBenchmark {
+                Divider()
+                    .padding(.vertical, 2)
 
-            HStack(spacing: MenuTabGridLayout.spacing) {
-                BenchmarkTab(
-                    isSelected: activeSelection == .benchmark,
-                    action: onSelectBenchmark
-                )
-                .frame(width: plan.uniformWidth, alignment: .leading)
+                HStack(spacing: MenuTabGridLayout.spacing) {
+                    BenchmarkTab(
+                        isSelected: activeSelection == .benchmark,
+                        action: onSelectBenchmark
+                    )
+                    .frame(width: plan.uniformWidth, alignment: .leading)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
