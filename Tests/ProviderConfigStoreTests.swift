@@ -39,6 +39,23 @@ final class ProviderConfigStoreTests: XCTestCase {
         XCTAssertEqual(platform, .incidentIO)
     }
 
+    func testDetectPlatformReturnsFlashdutyForEmbeddedPageConfig() async throws {
+        let html = """
+        <html><body>
+        <script>self.__next_f.push([1,"8:[\\"$\\",\\"$L1a\\",null,{\\"initialPageConfig\\":{\\"page_id\\":6410630422455,\\"name\\":\\"DeepSeek\\",\\"custom_domain\\":\\"status.deepseek.com\\",\\"components\\":[]}}]"])</script>
+        </body></html>
+        """
+        let session = makeMockSession(routes: [
+            .root: .ok(html)
+        ])
+
+        let platform = try await ProviderConfigStore.detectPlatform(
+            url: URL(string: "https://status.deepseek.com")!,
+            session: session
+        )
+        XCTAssertEqual(platform, .flashduty)
+    }
+
     func testDetectPlatformDefaultsToAtlassianForNonUTF8Data() async throws {
         let session = makeMockSession(routes: [
             .root: .okData(Data([0xFF, 0xFE]))
@@ -129,6 +146,28 @@ final class ProviderConfigStoreTests: XCTestCase {
         XCTAssertEqual(config.id, "openai")
         XCTAssertEqual(config.displayName, "OpenAI")
         XCTAssertEqual(config.platform, .incidentIO)
+        XCTAssertFalse(config.isBuiltIn)
+    }
+
+    func testDetectFlashdutyProviderFromHTMLWhenSummaryAPIIsMissing() async throws {
+        let html = """
+        <html><body>
+        <script>self.__next_f.push([1,"8:[\\"$\\",\\"$L1a\\",null,{\\"initialPageConfig\\":{\\"page_id\\":6410630422455,\\"name\\":\\"DeepSeek\\",\\"custom_domain\\":\\"status.deepseek.com\\",\\"components\\":[{\\"component_id\\":\\"api\\",\\"name\\":\\"API Service\\",\\"description\\":\\"API status\\",\\"available_since_seconds\\":1706745600,\\"order_id\\":1}],\\"sections\\":[]}}]"])</script>
+        </body></html>
+        """
+        let session = makeMockSession(routes: [
+            .summary: .error(404),
+            .root: .ok(html)
+        ])
+
+        let config = try await ProviderConfigStore.detect(
+            url: URL(string: "https://status.deepseek.com")!,
+            session: session
+        )
+
+        XCTAssertEqual(config.id, "6410630422455")
+        XCTAssertEqual(config.displayName, "DeepSeek")
+        XCTAssertEqual(config.platform, .flashduty)
         XCTAssertFalse(config.isBuiltIn)
     }
 

@@ -28,6 +28,7 @@ enum DateParsing {
 enum StatusPlatform: String, Codable {
     case atlassianStatuspage
     case incidentIO
+    case flashduty
 }
 
 struct ProviderConfig: Codable, Identifiable, Hashable {
@@ -38,8 +39,21 @@ struct ProviderConfig: Codable, Identifiable, Hashable {
     var isBuiltIn: Bool
     var aiStupidLevelVendor: String?
 
-    var apiURL: URL { baseURL.appendingPathComponent("api/v2/summary.json") }
+    var apiURL: URL {
+        switch effectivePlatform {
+        case .flashduty:
+            baseURL
+        case .atlassianStatuspage, .incidentIO:
+            baseURL.appendingPathComponent("api/v2/summary.json")
+        }
+    }
     var statusPageURL: URL { baseURL }
+    var effectivePlatform: StatusPlatform {
+        if baseURL.host?.lowercased() == "status.deepseek.com" {
+            return .flashduty
+        }
+        return platform
+    }
 
     func hash(into hasher: inout Hasher) { hasher.combine(id) }
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
@@ -876,6 +890,117 @@ struct OpenAIOfficialHistoryData: Decodable {
             },
             uniquingKeysWith: { _, new in new }
         )
+    }
+}
+
+struct FlashdutyPageConfig: Decodable {
+    let pageId: Int
+    let name: String
+    let customDomain: String?
+    let components: [FlashdutyComponent]
+    let sections: [FlashdutySection]?
+}
+
+struct FlashdutyComponent: Decodable {
+    let componentId: String
+    let name: String
+    let description: String?
+    let availableSinceSeconds: Int?
+    let orderId: Int?
+    let status: FlashdutyStatus?
+}
+
+struct FlashdutySection: Decodable {
+    let sectionId: String?
+    let name: String?
+    let orderId: Int?
+}
+
+struct FlashdutyChange: Decodable {
+    let changeId: Int
+    let title: String
+    let status: String
+    let affectedComponents: [FlashdutyComponentStatus]
+}
+
+struct FlashdutyComponentStatus: Decodable {
+    let componentId: String
+    let name: String?
+    let status: FlashdutyStatus
+}
+
+struct FlashdutyHistoryData: Decodable {
+    let componentImpacts: [FlashdutyComponentImpact]
+    let componentUptimes: [FlashdutyComponentUptime]
+    let linkedChanges: [FlashdutyLinkedChange]
+    var timeRange: FlashdutyTimeRange?
+
+    static let empty = FlashdutyHistoryData(
+        componentImpacts: [],
+        componentUptimes: [],
+        linkedChanges: [],
+        timeRange: nil
+    )
+}
+
+struct FlashdutyTimeRange: Decodable {
+    let from: Int
+    let to: Int
+}
+
+struct FlashdutyComponentImpact: Decodable {
+    let componentId: String
+    let changeId: Int
+    let startAtSeconds: Int
+    let endAtSeconds: Int
+    let status: FlashdutyStatus
+}
+
+struct FlashdutyComponentUptime: Decodable {
+    let componentId: String?
+    let sectionId: String?
+    let uptime: Double
+
+    var uptimePercent: Double? { uptime }
+}
+
+struct FlashdutyLinkedChange: Decodable {
+    let id: Int
+    let type: String?
+    let title: String
+}
+
+enum FlashdutyStatus: String, Decodable, Comparable {
+    case operational
+    case degraded
+    case partialOutage = "partial_outage"
+    case fullOutage = "full_outage"
+    case maintenance
+
+    var componentStatus: ComponentStatus {
+        switch self {
+        case .operational: .operational
+        case .degraded: .degradedPerformance
+        case .partialOutage: .partialOutage
+        case .fullOutage: .majorOutage
+        case .maintenance: .underMaintenance
+        }
+    }
+
+    var officialImpactStatus: OfficialImpactStatus? {
+        switch self {
+        case .degraded: .degradedPerformance
+        case .partialOutage: .partialOutage
+        case .fullOutage: .fullOutage
+        case .maintenance: .underMaintenance
+        case .operational: nil
+        }
+    }
+
+    private var severity: Int { componentStatus.severity }
+
+    static func < (lhs: FlashdutyStatus, rhs: FlashdutyStatus) -> Bool {
+        lhs.severity < rhs.severity
     }
 }
 

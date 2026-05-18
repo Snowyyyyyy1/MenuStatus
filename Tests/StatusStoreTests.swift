@@ -51,6 +51,19 @@ final class StatusStoreTests: XCTestCase {
         )
     }
 
+    func testDeepSeekSavedWithOldPlatformUsesFlashdutyEffectivePlatform() {
+        let deepSeek = ProviderConfig(
+            id: "deepseek-status",
+            displayName: "DeepSeek Service",
+            baseURL: URL(string: "https://status.deepseek.com")!,
+            platform: .atlassianStatuspage,
+            isBuiltIn: false
+        )
+
+        XCTAssertEqual(deepSeek.effectivePlatform, .flashduty)
+        XCTAssertEqual(deepSeek.apiURL, URL(string: "https://status.deepseek.com")!)
+    }
+
     func testTooltipOffsetUsesMeasuredMenuWidth() {
         XCTAssertEqual(
             MenuLayoutMetrics.tooltipOffsetX(dayX: 260, menuWidth: 300),
@@ -261,6 +274,40 @@ final class StatusStoreTests: XCTestCase {
 
         XCTAssertEqual(payload.componentsByID["comp-chat"]?.name, "New Chat")
         XCTAssertEqual(payload.componentsByID["comp-chat"]?.uptimePercent, 99.99)
+    }
+
+    func testParseFlashdutySummaryHTMLExtractsPageComponentsAndActiveStatus() throws {
+        let html = """
+        <script>self.__next_f.push([1,"8:[\\"$\\",\\"$L1a\\",null,{\\"initialPageConfig\\":{\\"page_id\\":6410630422455,\\"name\\":\\"DeepSeek\\",\\"custom_domain\\":\\"status.deepseek.com\\",\\"components\\":[{\\"component_id\\":\\"api\\",\\"name\\":\\"API Service\\",\\"description\\":\\"API status\\",\\"available_since_seconds\\":1706745600,\\"order_id\\":1},{\\"component_id\\":\\"web\\",\\"name\\":\\"Web Chat Service\\",\\"description\\":\\"Web status\\",\\"available_since_seconds\\":1706745600,\\"order_id\\":2}],\\"sections\\":[]}}]"])</script>
+        <script>self.__next_f.push([1,"1d:[\\"$\\",\\"$L22\\",null,{\\"initialData\\":{\\"page\\":{\\"page_id\\":6410630422455,\\"name\\":\\"DeepSeek\\",\\"custom_domain\\":\\"status.deepseek.com\\",\\"components\\":[{\\"component_id\\":\\"api\\",\\"name\\":\\"API Service\\",\\"description\\":\\"API status\\",\\"available_since_seconds\\":1706745600,\\"order_id\\":1},{\\"component_id\\":\\"web\\",\\"name\\":\\"Web Chat Service\\",\\"description\\":\\"Web status\\",\\"available_since_seconds\\":1706745600,\\"order_id\\":2}],\\"sections\\":[]},\\"active_changes\\":[{\\"change_id\\":42,\\"title\\":\\"API degraded\\",\\"status\\":\\"identified\\",\\"affected_components\\":[{\\"component_id\\":\\"api\\",\\"name\\":\\"API Service\\",\\"status\\":\\"degraded\\"}]}]}}]"])</script>
+        """
+
+        let summary = try StatusClient.parseFlashdutySummaryHTML(Data(html.utf8), sourceURL: URL(string: "https://status.deepseek.com")!)
+
+        XCTAssertEqual(summary.page.id, "6410630422455")
+        XCTAssertEqual(summary.page.name, "DeepSeek")
+        XCTAssertEqual(summary.status.indicator, .minor)
+        XCTAssertEqual(summary.components.map(\.id), ["api", "web"])
+        XCTAssertEqual(summary.components.first?.status, .degradedPerformance)
+        XCTAssertEqual(summary.components.last?.status, .operational)
+        XCTAssertEqual(summary.components.first?.startDate, "2024-02-01T00:00:00Z")
+        XCTAssertEqual(summary.incidents?.first?.name, "API degraded")
+    }
+
+    func testParseFlashdutyHistoryHTMLExtractsImpactsAndIncidentNames() throws {
+        let html = """
+        <script>self.__next_f.push([1,"8:[\\"$\\",\\"$L1a\\",null,{\\"initialPageConfig\\":{\\"page_id\\":6410630422455,\\"name\\":\\"DeepSeek\\",\\"custom_domain\\":\\"status.deepseek.com\\",\\"components\\":[{\\"component_id\\":\\"api\\",\\"name\\":\\"API Service\\",\\"description\\":\\"API status\\",\\"available_since_seconds\\":1706745600,\\"order_id\\":1}],\\"sections\\":[]}}]"])</script>
+        <script>self.__next_f.push([1,"1e:[\\"$\\",\\"$L24\\",null,{\\"timeRange\\":{\\"from\\":1771286400,\\"to\\":1779148799},\\"initialData\\":{\\"component_impacts\\":[{\\"component_id\\":\\"api\\",\\"change_id\\":42,\\"start_at_seconds\\":1776853398,\\"end_at_seconds\\":1776857192,\\"status\\":\\"full_outage\\"}],\\"component_uptimes\\":[{\\"component_id\\":\\"api\\",\\"uptime\\":99.91}],\\"linked_changes\\":[{\\"id\\":42,\\"type\\":\\"incident\\",\\"title\\":\\"API outage\\"}]}}]"])</script>
+        """
+
+        let payload = try StatusClient.parseFlashdutyHistoryHTML(Data(html.utf8))
+
+        XCTAssertEqual(payload.componentsByID["api"]?.name, "API Service")
+        XCTAssertEqual(payload.componentsByID["api"]?.uptimePercent, 99.91)
+        XCTAssertEqual(payload.componentsByID["api"]?.impacts.first?.status, .fullOutage)
+        XCTAssertEqual(payload.componentsByID["api"]?.impacts.first?.statusPageIncidentId, "42")
+        XCTAssertEqual(payload.incidentNames["42"], "API outage")
+        XCTAssertEqual(payload.generatedAt?.timeIntervalSince1970 ?? 0, 1_779_148_799, accuracy: 0.01)
     }
 
     func testDerivePresentationStatePreservesExistingDerivedDataUntilInputsAreComplete() {

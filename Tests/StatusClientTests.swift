@@ -2,6 +2,20 @@ import XCTest
 @testable import MenuStatus
 
 final class StatusClientTests: XCTestCase {
+    func testAdapterSelectionUsesEffectivePlatform() {
+        let legacyDeepSeek = ProviderConfig(
+            id: "deepseek-status",
+            displayName: "DeepSeek Service",
+            baseURL: URL(string: "https://status.deepseek.com")!,
+            platform: .atlassianStatuspage,
+            isBuiltIn: false
+        )
+
+        XCTAssertTrue(StatusClient.adapter(for: ProviderConfig.openAI) is IncidentIOStatusProviderAdapter)
+        XCTAssertTrue(StatusClient.adapter(for: ProviderConfig.anthropic) is AtlassianStatuspageProviderAdapter)
+        XCTAssertTrue(StatusClient.adapter(for: legacyDeepSeek) is FlashdutyStatusProviderAdapter)
+    }
+
     func testValidateHTTPResponseAcceptsSuccessfulStatusCode() throws {
         let url = try XCTUnwrap(URL(string: "https://status.openai.com"))
         let response = try XCTUnwrap(

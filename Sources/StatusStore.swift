@@ -339,7 +339,7 @@ final class StatusStore {
                     }
                 }
 
-                if provider.platform == .atlassianStatuspage {
+                if provider.effectivePlatform == .atlassianStatuspage {
                     group.addTask {
                         do {
                             let maintenances = try await fetcher.fetchScheduledMaintenances(provider)
@@ -549,7 +549,7 @@ extension StatusStore {
 
             // From incidents API (Atlassian Statuspage — has affected_components)
             var processedIncidentIDs = Set<String>()
-            if provider.platform == .atlassianStatuspage {
+            if provider.effectivePlatform == .atlassianStatuspage {
                 let combined = (incidents[provider] ?? []) + (maintenances[provider] ?? [])
                 for incident in combined {
                     guard let startedAtStr = incident.startedAt,
@@ -605,8 +605,8 @@ extension StatusStore {
                 }
             }
 
-            // From official history impacts (incident.io — has component-level impacts + incident names)
-            if provider.platform == .incidentIO, let history = officialHistories[provider] {
+            // From official history impacts (incident.io / Flashduty — has component-level impacts + incident names)
+            if (provider.effectivePlatform == .incidentIO || provider.effectivePlatform == .flashduty), let history = officialHistories[provider] {
                 for (componentId, component) in history.componentsByID {
                     for impact in component.impacts {
                         guard let startAt = DateParsing.parseISODate(impact.startAt) else { continue }

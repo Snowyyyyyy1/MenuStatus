@@ -802,7 +802,7 @@ private struct ProviderSidebarRow: View {
 
     private var subtitle: String {
         let firstLine = provider.settingsHostDisplay
-        let secondLine = "\(SettingsCopy.providerPlatformName(provider.platform, locale: locale)) • \(SettingsCopy.providerTypeName(isBuiltIn: provider.isBuiltIn, locale: locale))"
+        let secondLine = "\(SettingsCopy.providerPlatformName(provider.effectivePlatform, locale: locale)) • \(SettingsCopy.providerTypeName(isBuiltIn: provider.isBuiltIn, locale: locale))"
         return "\(firstLine)\n\(secondLine)"
     }
 
@@ -828,7 +828,7 @@ private struct ProviderDetailView: View {
         [
             (SettingsCopy.literal(locale: locale, english: "URL", chinese: "URL"), provider.baseURL.absoluteString),
             (SettingsCopy.literal(locale: locale, english: "Host", chinese: "主机"), provider.settingsHostDisplay),
-            (SettingsCopy.literal(locale: locale, english: "Platform", chinese: "平台"), SettingsCopy.providerPlatformName(provider.platform, locale: locale)),
+            (SettingsCopy.literal(locale: locale, english: "Platform", chinese: "平台"), SettingsCopy.providerPlatformName(provider.effectivePlatform, locale: locale)),
             (SettingsCopy.literal(locale: locale, english: "Type", chinese: "类型"), SettingsCopy.providerTypeName(isBuiltIn: provider.isBuiltIn, locale: locale)),
         ]
     }
@@ -918,7 +918,7 @@ private struct ProviderDetailHeader: View {
     }
 
     private var detailSubtitle: String {
-        "\(provider.settingsHostDisplay) • \(SettingsCopy.providerPlatformName(provider.platform, locale: locale)) • \(SettingsCopy.providerTypeName(isBuiltIn: provider.isBuiltIn, locale: locale))"
+        "\(provider.settingsHostDisplay) • \(SettingsCopy.providerPlatformName(provider.effectivePlatform, locale: locale)) • \(SettingsCopy.providerTypeName(isBuiltIn: provider.isBuiltIn, locale: locale))"
     }
 }
 
@@ -1246,6 +1246,8 @@ private enum SettingsCopy {
             return literal(locale: locale, english: "Statuspage", chinese: "Statuspage")
         case .incidentIO:
             return "incident.io"
+        case .flashduty:
+            return "Flashduty"
         }
     }
 

@@ -55,14 +55,35 @@ final class ProviderConfigStore {
 
     nonisolated static func detect(url: URL, session: URLSession = StatusClient.session) async throws -> ProviderConfig {
         let apiURL = url.appendingPathComponent("api/v2/summary.json")
-        async let summaryFetch = session.data(from: apiURL)
-        async let platformResult = detectPlatform(url: url, session: session)
+        let data: Data
+        do {
+            let (summaryData, response) = try await session.data(from: apiURL)
+            try StatusClient.validateHTTPResponse(response, for: apiURL)
+            data = summaryData
+        } catch let transportError as StatusClientTransportError {
+            guard case .unsuccessfulStatusCode(_, 404) = transportError else {
+                throw transportError
+            }
 
-        let (data, response) = try await summaryFetch
-        try StatusClient.validateHTTPResponse(response, for: apiURL)
+            do {
+                let (rootData, rootResponse) = try await session.data(from: url)
+                try StatusClient.validateHTTPResponse(rootResponse, for: url)
+                if try detectPlatform(in: rootData) == .flashduty {
+                    let page = try StatusClient.parseFlashdutyPageConfig(rootData)
+                    return ProviderConfig(
+                        id: String(page.pageId), displayName: page.name,
+                        baseURL: url, platform: .flashduty, isBuiltIn: false
+                    )
+                }
+            } catch {
+                throw transportError
+            }
+            throw transportError
+        } catch {
+            throw error
+        }
         let summary = try StatusClient.decoder.decode(StatuspageSummary.self, from: data)
-
-        let platform = try await platformResult
+        let platform = (try? await detectPlatform(url: url, session: session)) ?? .atlassianStatuspage
 
         return ProviderConfig(
             id: summary.page.id, displayName: summary.page.name,
@@ -73,8 +94,16 @@ final class ProviderConfigStore {
     nonisolated static func detectPlatform(url: URL, session: URLSession = StatusClient.session) async throws -> StatusPlatform {
         let (data, response) = try await session.data(from: url)
         try StatusClient.validateHTTPResponse(response, for: url)
+        return try detectPlatform(in: data)
+    }
+
+    nonisolated private static func detectPlatform(in data: Data) throws -> StatusPlatform {
         guard let html = String(data: data, encoding: .utf8) else {
             return .atlassianStatuspage
+        }
+        if html.contains("initialPageConfig")
+            && (html.contains("page_id") || html.contains("component_id")) {
+            return .flashduty
         }
         return html.contains("__next_f.push") ? .incidentIO : .atlassianStatuspage
     }

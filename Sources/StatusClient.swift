@@ -10,56 +10,33 @@ struct StatusClient {
     }()
 
     static func fetchSummary(for provider: ProviderConfig) async throws -> StatuspageSummary {
-        let data = try await fetchData(from: provider.apiURL)
-        return try decoder.decode(StatuspageSummary.self, from: data)
+        try await adapter(for: provider).fetchSummary(for: provider)
     }
 
     static func fetchIncidents(for provider: ProviderConfig) async throws -> [Incident] {
-        var components = URLComponents(url: provider.baseURL.appendingPathComponent("api/v2/incidents.json"), resolvingAgainstBaseURL: false)!
-        components.queryItems = [URLQueryItem(name: "per_page", value: "100")]
-        guard let url = components.url else {
-            throw StatusClientTransportError.invalidResponse(provider.baseURL)
-        }
-        let data = try await fetchData(from: url)
-        let response = try decoder.decode(IncidentHistoryResponse.self, from: data)
-        return response.incidents
+        try await adapter(for: provider).fetchIncidents(for: provider)
     }
 
     static func fetchScheduledMaintenances(for provider: ProviderConfig) async throws -> [Incident] {
-        let url = provider.baseURL.appendingPathComponent("api/v2/scheduled-maintenances.json")
-        let data = try await fetchData(from: url)
-        let response = try decoder.decode(ScheduledMaintenancesResponse.self, from: data)
-        return response.scheduledMaintenances
+        try await adapter(for: provider).fetchScheduledMaintenances(for: provider)
     }
 
     static func fetchHistoryPageIncidents(for provider: ProviderConfig) async throws -> [HistoryPageIncident] {
-        guard provider.platform == .atlassianStatuspage else { return [] }
-        let data = try await fetchData(from: provider.statusPageURL.appendingPathComponent("history"))
-        return parseAtlassianHistoryPage(data)
+        try await adapter(for: provider).fetchHistoryPageIncidents(for: provider)
     }
 
     static func fetchOfficialHistory(for provider: ProviderConfig) async throws -> OfficialHistorySnapshot {
-        switch provider.platform {
-        case .incidentIO:
-            async let mainFetch = fetchData(from: provider.statusPageURL)
-            async let historyFetch: Data? = try? await fetchData(
-                from: provider.statusPageURL.appendingPathComponent("history")
-            )
+        try await adapter(for: provider).fetchOfficialHistory(for: provider)
+    }
 
-            var snapshot = try parseIncidentIOHistoryHTML(try await mainFetch)
-            if let historyData = await historyFetch,
-               let names = try? parseIncidentIOIncidentNames(historyData) {
-                snapshot = OfficialHistorySnapshot(
-                    generatedAt: snapshot.generatedAt,
-                    groups: snapshot.groups,
-                    componentsByID: snapshot.componentsByID,
-                    incidentNames: names
-                )
-            }
-            return snapshot
+    static func adapter(for provider: ProviderConfig) -> any StatusProviderAdapter {
+        switch provider.effectivePlatform {
+        case .flashduty:
+            FlashdutyStatusProviderAdapter()
+        case .incidentIO:
+            IncidentIOStatusProviderAdapter()
         case .atlassianStatuspage:
-            let data = try await fetchData(from: provider.statusPageURL)
-            return try parseAtlassianStatuspageHistoryHTML(data)
+            AtlassianStatuspageProviderAdapter()
         }
     }
 
@@ -81,7 +58,7 @@ struct StatusClient {
         return URLSession(configuration: config)
     }()
 
-    private static func fetchData(from url: URL) async throws -> Data {
+    static func fetchData(from url: URL) async throws -> Data {
         let (data, response) = try await session.data(from: url)
         try validateHTTPResponse(response, for: url)
         return data
@@ -218,6 +195,124 @@ struct StatusClient {
         return OfficialHistorySnapshot(generatedAt: generatedAt, groups: groups, componentsByID: mappedComponents, incidentNames: [:])
     }
 
+    static func parseFlashdutySummaryHTML(_ data: Data, sourceURL: URL) throws -> StatuspageSummary {
+        let html = try flashdutyHTML(from: data)
+        let pageConfig = try parseFlashdutyPageConfig(fromHTML: html)
+        let activeChanges = (try? parseFlashdutyActiveChanges(fromHTML: html)) ?? []
+        let statusByComponentID = flashdutyActiveStatusByComponentID(activeChanges)
+        let components = pageConfig.components
+            .sorted { ($0.orderId ?? Int.max, $0.componentId) < ($1.orderId ?? Int.max, $1.componentId) }
+            .map { component in
+                Component(
+                    id: component.componentId,
+                    name: component.name,
+                    status: statusByComponentID[component.componentId] ?? .operational,
+                    position: component.orderId,
+                    description: component.description,
+                    startDate: component.availableSinceSeconds.map(isoStringFromUnixSeconds),
+                    groupId: nil,
+                    group: false,
+                    onlyShowIfDegraded: false
+                )
+            }
+        let overallStatus = components.map(\.status).max() ?? .operational
+        let incidents = activeChanges.map { change in
+            Incident(
+                id: String(change.changeId),
+                name: change.title,
+                status: flashdutyIncidentStatus(change.status),
+                impact: statusIndicator(for: (change.affectedComponents.map(\.status).max()?.componentStatus) ?? overallStatus),
+                shortlink: nil,
+                startedAt: nil,
+                createdAt: nil,
+                updatedAt: nil,
+                monitoringAt: nil,
+                resolvedAt: nil,
+                incidentUpdates: nil,
+                components: change.affectedComponents.map {
+                    IncidentComponent(id: $0.componentId, name: $0.name, status: $0.status.componentStatus)
+                }
+            )
+        }
+
+        return StatuspageSummary(
+            page: StatusPage(
+                id: String(pageConfig.pageId),
+                name: pageConfig.name,
+                url: sourceURL.absoluteString,
+                timeZone: "Etc/UTC",
+                updatedAt: nil
+            ),
+            status: OverallStatus(
+                indicator: statusIndicator(for: overallStatus),
+                description: statusDescription(for: overallStatus)
+            ),
+            components: components,
+            incidents: incidents,
+            scheduledMaintenances: nil
+        )
+    }
+
+    static func parseFlashdutyHistoryHTML(_ data: Data) throws -> OfficialHistorySnapshot {
+        let html = try flashdutyHTML(from: data)
+        let pageConfig = try parseFlashdutyPageConfig(fromHTML: html)
+        let historyData = (try? parseFlashdutyHistoryData(fromHTML: html)) ?? FlashdutyHistoryData.empty
+
+        let uptimeByComponentID = Dictionary(
+            historyData.componentUptimes.compactMap { uptime -> (String, Double)? in
+                guard let componentID = uptime.componentId, let percentage = uptime.uptimePercent else { return nil }
+                return (componentID, percentage)
+            },
+            uniquingKeysWith: { _, new in new }
+        )
+        let impactsByComponentID = Dictionary(
+            grouping: historyData.componentImpacts.compactMap { impact -> OfficialComponentImpact? in
+                guard let officialStatus = impact.status.officialImpactStatus else { return nil }
+                return OfficialComponentImpact(
+                    componentId: impact.componentId,
+                    endAt: isoStringFromUnixSeconds(impact.endAtSeconds),
+                    startAt: isoStringFromUnixSeconds(impact.startAtSeconds),
+                    status: officialStatus,
+                    statusPageIncidentId: String(impact.changeId)
+                )
+            },
+            by: \.componentId
+        )
+        let components = Dictionary(
+            pageConfig.components.map { component in
+                (
+                    component.componentId,
+                    OfficialHistoryComponent(
+                        id: component.componentId,
+                        name: component.name,
+                        hidden: false,
+                        displayUptime: true,
+                        dataAvailableSince: component.availableSinceSeconds.map(isoStringFromUnixSeconds),
+                        uptimePercent: uptimeByComponentID[component.componentId],
+                        timelineSource: .impacts(impactsByComponentID[component.componentId] ?? [])
+                    )
+                )
+            },
+            uniquingKeysWith: { _, new in new }
+        )
+        let incidentNames = Dictionary(
+            historyData.linkedChanges.map { (String($0.id), $0.title) },
+            uniquingKeysWith: { _, new in new }
+        )
+        let generatedAt = historyData.timeRange.map { Date(timeIntervalSince1970: TimeInterval($0.to)) }
+
+        return OfficialHistorySnapshot(
+            generatedAt: generatedAt,
+            groups: [],
+            componentsByID: components,
+            incidentNames: incidentNames
+        )
+    }
+
+    static func parseFlashdutyPageConfig(_ data: Data) throws -> FlashdutyPageConfig {
+        try parseFlashdutyPageConfig(fromHTML: try flashdutyHTML(from: data))
+    }
+
     private static func extractStatuspageComponentBlocks(
         from html: String,
         paletteOverrides: [String: TimelineDayLevel]
@@ -320,6 +415,111 @@ struct StatusClient {
         return overrides
     }
 
+    private static func flashdutyHTML(from data: Data) throws -> String {
+        guard let html = String(data: data, encoding: .utf8) else {
+            throw FlashdutyParseError.invalidHTML
+        }
+        return html
+    }
+
+    private static func parseFlashdutyPageConfig(fromHTML html: String) throws -> FlashdutyPageConfig {
+        let decodedBlocks = try extractDecodedNextBlocks(from: html)
+        for block in decodedBlocks where block.contains(#""initialPageConfig":{"#) {
+            let json = try sanitizeEmbeddedJSON(extractJSONObject(after: #""initialPageConfig":"#, in: block))
+            return try decoder.decode(FlashdutyPageConfig.self, from: Data(json.utf8))
+        }
+        for block in decodedBlocks where block.contains(#""page":{"#) {
+            let json = try sanitizeEmbeddedJSON(extractJSONObject(after: #""page":"#, in: block))
+            return try decoder.decode(FlashdutyPageConfig.self, from: Data(json.utf8))
+        }
+        throw FlashdutyParseError.missingPageConfig
+    }
+
+    private static func parseFlashdutyActiveChanges(fromHTML html: String) throws -> [FlashdutyChange] {
+        let decodedBlocks = try extractDecodedNextBlocks(from: html)
+        for block in decodedBlocks where block.contains(#""active_changes":"#) {
+            let json = try sanitizeEmbeddedJSON(extractJSONArray(after: #""active_changes":"#, in: block))
+            return try decoder.decode([FlashdutyChange].self, from: Data(json.utf8))
+        }
+        return []
+    }
+
+    private static func parseFlashdutyHistoryData(fromHTML html: String) throws -> FlashdutyHistoryData {
+        let decodedBlocks = try extractDecodedNextBlocks(from: html)
+        for block in decodedBlocks where block.contains(#""component_impacts":["#) {
+            let json = try sanitizeEmbeddedJSON(extractJSONObject(after: #""initialData":"#, in: block))
+            var historyData = try decoder.decode(FlashdutyHistoryData.self, from: Data(json.utf8))
+            historyData.timeRange = try parseFlashdutyTimeRange(from: block)
+            return historyData
+        }
+        return .empty
+    }
+
+    private static func parseFlashdutyTimeRange(from block: String) throws -> FlashdutyTimeRange? {
+        guard block.contains(#""timeRange":{"#) else { return nil }
+        let json = try sanitizeEmbeddedJSON(extractJSONObject(after: #""timeRange":"#, in: block))
+        return try decoder.decode(FlashdutyTimeRange.self, from: Data(json.utf8))
+    }
+
+    private static func flashdutyActiveStatusByComponentID(_ changes: [FlashdutyChange]) -> [String: ComponentStatus] {
+        var statuses: [String: ComponentStatus] = [:]
+        for change in changes where flashdutyIncidentStatus(change.status).isActive {
+            for component in change.affectedComponents {
+                let status = component.status.componentStatus
+                statuses[component.componentId] = max(statuses[component.componentId] ?? .operational, status)
+            }
+        }
+        return statuses
+    }
+
+    private static func flashdutyIncidentStatus(_ status: String) -> IncidentStatus {
+        switch status {
+        case "resolved":
+            .resolved
+        case "monitoring":
+            .monitoring
+        case "identified":
+            .identified
+        default:
+            .investigating
+        }
+    }
+
+    private static func statusIndicator(for status: ComponentStatus) -> StatusIndicator {
+        switch status {
+        case .operational:
+            .none
+        case .degradedPerformance:
+            .minor
+        case .partialOutage, .underMaintenance:
+            status == .underMaintenance ? .maintenance : .major
+        case .majorOutage:
+            .critical
+        }
+    }
+
+    private static func statusDescription(for status: ComponentStatus) -> String {
+        switch status {
+        case .operational:
+            "All Systems Operational"
+        case .degradedPerformance:
+            "Minor Issues"
+        case .partialOutage:
+            "Partial Outage"
+        case .majorOutage:
+            "Major Outage"
+        case .underMaintenance:
+            "Maintenance"
+        }
+    }
+
+    private static func isoStringFromUnixSeconds(_ seconds: Int) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        return formatter.string(from: Date(timeIntervalSince1970: TimeInterval(seconds)))
+    }
+
     private static func decodeHTML(_ value: String) -> String {
         value
             .replacingOccurrences(of: "&nbsp;", with: " ")
@@ -390,6 +590,55 @@ struct StatusClient {
                     if depth == 0 {
                         let endIndex = text.index(after: currentIndex)
                         return String(text[objectStart..<endIndex])
+                    }
+                default:
+                    break
+                }
+            }
+
+            currentIndex = text.index(after: currentIndex)
+        }
+
+        throw IncidentIOParseError.unterminatedObject(marker)
+    }
+
+    private static func extractJSONArray(after marker: String, in text: String) throws -> String {
+        guard let markerRange = text.range(of: marker) else {
+            throw IncidentIOParseError.missingMarker(marker)
+        }
+
+        let suffix = text[markerRange.upperBound...]
+        guard let arrayStart = suffix.firstIndex(of: "[") else {
+            throw IncidentIOParseError.missingObjectAfterMarker(marker)
+        }
+
+        var depth = 0
+        var inString = false
+        var isEscaping = false
+        var currentIndex = arrayStart
+
+        while currentIndex < text.endIndex {
+            let character = text[currentIndex]
+
+            if inString {
+                if isEscaping {
+                    isEscaping = false
+                } else if character == "\\" {
+                    isEscaping = true
+                } else if character == "\"" {
+                    inString = false
+                }
+            } else {
+                switch character {
+                case "\"":
+                    inString = true
+                case "[":
+                    depth += 1
+                case "]":
+                    depth -= 1
+                    if depth == 0 {
+                        let endIndex = text.index(after: currentIndex)
+                        return String(text[arrayStart..<endIndex])
                     }
                 default:
                     break
@@ -512,6 +761,11 @@ enum IncidentIOParseError: Error {
 
 enum AtlassianStatuspageParseError: Error {
     case invalidHTML
+}
+
+enum FlashdutyParseError: Error {
+    case invalidHTML
+    case missingPageConfig
 }
 
 enum StatusClientTransportError: LocalizedError, Equatable {
