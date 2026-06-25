@@ -108,6 +108,7 @@ final class AIStupidLevelStore {
     private let now: () -> Date
     private var pollingTask: Task<Void, Never>?
     private var hoverFetchTasks: [String: Task<HoverFetchPayload, Never>] = [:]
+    private var hoverCacheTimestamps: [String: Date] = [:]
     private var pathMonitor: NWPathMonitor?
     private var debounceTask: Task<Void, Never>?
     private var currentRefresh: Task<Void, Never>?
@@ -312,8 +313,6 @@ final class AIStupidLevelStore {
         let payload = await task.value
         hoverFetchTasks[modelId] = nil
 
-        enforceHoverCacheLimit()
-
         if let detail = payload.detail {
             modelDetailsByID[modelId] = detail
         }
@@ -323,18 +322,34 @@ final class AIStupidLevelStore {
         if let history = payload.history {
             historyByModelID[modelId] = history
         }
+        if modelDetailsByID[modelId] != nil
+            || modelStatsByModelID[modelId] != nil
+            || historyByModelID[modelId] != nil {
+            hoverCacheTimestamps[modelId] = now()
+        }
+        // Enforce after inserting so the cap is exact (not off-by-one) and the just-written
+        // model — which has the newest timestamp — is never the one evicted.
+        enforceHoverCacheLimit()
         persistHoverCacheEntryIfAvailable(for: modelId)
     }
 
     private func enforceHoverCacheLimit() {
         let maxEntries = PersistentCache.maxEntries
-        guard modelDetailsByID.count > maxEntries else { return }
-        let overflow = modelDetailsByID.count - maxEntries
-        let oldestKeys = Array(modelDetailsByID.keys.prefix(overflow))
+        // Count across the union of all three caches (tracked by hoverCacheTimestamps) so a
+        // model with only stats/history can't grow unbounded when its detail fetch keeps
+        // failing. `keys.prefix` would have evicted arbitrary hash-ordered keys, not the
+        // oldest — sort by cache timestamp instead.
+        guard hoverCacheTimestamps.count > maxEntries else { return }
+        let overflow = hoverCacheTimestamps.count - maxEntries
+        let oldestKeys = hoverCacheTimestamps
+            .sorted { $0.value < $1.value }
+            .prefix(overflow)
+            .map(\.key)
         for key in oldestKeys {
             modelDetailsByID.removeValue(forKey: key)
             modelStatsByModelID.removeValue(forKey: key)
             historyByModelID.removeValue(forKey: key)
+            hoverCacheTimestamps.removeValue(forKey: key)
         }
     }
 
@@ -460,6 +475,7 @@ final class AIStupidLevelStore {
             modelDetailsByID[modelId] = entry.detail
             modelStatsByModelID[modelId] = entry.stats
             historyByModelID[modelId] = entry.history
+            hoverCacheTimestamps[modelId] = entry.cachedAt
         }
     }
 

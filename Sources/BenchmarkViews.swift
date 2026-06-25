@@ -92,7 +92,6 @@ struct BenchmarkModelHoverCard: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.locale) private var locale
 
-    private static let timestampFormatter = ISO8601DateFormatter()
     private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
@@ -115,7 +114,11 @@ struct BenchmarkModelHoverCard: View {
                 defaultValue: "Update time unavailable"
             )
         }
-        guard let date = Self.timestampFormatter.date(from: raw) else {
+        // The API hands back ISO-8601 timestamps with fractional seconds
+        // (e.g. "2026-04-11T04:58:43.775Z"); the shared parser handles both
+        // fractional and non-fractional shapes, where a bare ISO8601DateFormatter
+        // would fail on fractional seconds and leak the raw string to the user.
+        guard let date = DateParsing.parseISODate(raw) else {
             return raw
         }
 

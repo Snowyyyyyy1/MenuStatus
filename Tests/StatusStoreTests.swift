@@ -248,6 +248,43 @@ final class StatusStoreTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testHistoryFetchFailureWithoutCacheFlagsProviderUnavailable() async {
+        let defaults = makeIsolatedDefaults(testName: #function)
+        let providerStore = ProviderConfigStore()
+        let settings = SettingsStore(defaults: defaults)
+        settings.attachProviderConfigs(providerStore)
+
+        let provider = ProviderConfig.openAI
+        let summary = StatuspageSummary(
+            page: StatusPage(id: "page", name: "OpenAI", url: "https://status.openai.com", timeZone: "Etc/UTC", updatedAt: nil),
+            status: OverallStatus(indicator: .minor, description: "Minor Issues"),
+            components: [
+                Component(id: "comp-api", name: "API", status: .partialOutage, position: 1, description: nil, startDate: nil, groupId: nil, group: false, onlyShowIfDegraded: nil)
+            ],
+            incidents: [],
+            scheduledMaintenances: []
+        )
+
+        let fetcher = StatusStore.Fetcher(
+            fetchSummary: { _ in summary },
+            fetchOfficialHistory: { _ in throw URLError(.timedOut) },
+            fetchIncidents: { _ in [] },
+            fetchScheduledMaintenances: { _ in [] },
+            fetchHistoryPageIncidents: { _ in [] }
+        )
+
+        let store = StatusStore(settings: settings, defaults: defaults)
+        await store.refreshNow(fetcher: fetcher)
+
+        // Summary loaded, but the history fetch failed with no cached timeline to fall back
+        // on — the provider must be flagged so the UI can show an explicit hint instead of
+        // a silent bar-less list.
+        XCTAssertNotNil(store.summaries[provider])
+        XCTAssertTrue(store.historyUnavailableProviders.contains(provider))
+        XCTAssertNil(store.timeline(for: provider, componentId: "comp-api"))
+    }
+
     func testParseOpenAIOfficialHistoryHTMLExtractsStructureAndMetrics() throws {
         let html = """
         <script>self.__next_f.push([1,"3:[\\"$\\",\\"$L15\\",null,{\\"slug\\":\\"status.openai.com\\",\\"initialNow\\":{\\"isoDate\\":\\"2026-03-27T17:04:55.680Z\\"},\\"summary\\":{\\"structure\\":{\\"items\\":[{\\"group\\":{\\"id\\":\\"group-apis\\",\\"name\\":\\"APIs\\",\\"hidden\\":false,\\"display_aggregated_uptime\\":true,\\"components\\":[{\\"component_id\\":\\"comp-chat\\",\\"hidden\\":false,\\"display_uptime\\":true,\\"name\\":\\"Chat Completions\\",\\"data_available_since\\":\\"2021-03-02T02:07:24.886Z\\"}]}}]}}}"])</script>
@@ -572,11 +609,51 @@ final class StatusStoreTests: XCTestCase {
             numDays: 3,
             title: "claude.ai",
             timeZoneIdentifier: "Etc/UTC",
-            availableSince: "2026-03-22"
+            // Real data sources hand back full ISO timestamps (incident.io passes the
+            // API value through with fractional seconds; Flashduty self-generates one
+            // with a `T`), never a bare `yyyy-MM-dd`. Use the real shape here.
+            availableSince: "2026-03-22T00:00:00.000Z"
         )
 
         XCTAssertEqual(utcTimeline.days.map(\.level), [TimelineDayLevel.majorOutage, .majorOutage])
         XCTAssertEqual(availableTimeline.days.map(\.level), [.noData, .operational, .operational])
+        // noData days must not count toward uptime: 2 operational / 2 valid = 100%,
+        // not 2/3 = 66.7%.
+        XCTAssertEqual(availableTimeline.uptimePercent, 100.0, accuracy: 0.001)
+    }
+
+    func testDateParsingHandlesFractionalAndPlainISOTimestamps() {
+        // Benchmark + incident.io APIs return fractional seconds; Atlassian often omits them.
+        // A bare ISO8601DateFormatter() fails on fractional seconds — the shared parser must not.
+        XCTAssertNotNil(DateParsing.parseISODate("2026-04-11T04:58:43.775Z"))
+        XCTAssertNotNil(DateParsing.parseISODate("2026-04-11T04:58:43Z"))
+        XCTAssertNil(DateParsing.parseISODate("garbage"))
+        XCTAssertNil(DateParsing.parseISODate(nil))
+    }
+
+    func testAggregateAlignsByDateAcrossUnequalLengthTimelines() {
+        let cal = Calendar(identifier: .gregorian)
+        let day0 = cal.startOfDay(for: Date(timeIntervalSince1970: 0))
+        func day(_ offset: Int) -> Date { cal.date(byAdding: .day, value: offset, to: day0)! }
+
+        // Three days; day 1 has a major outage.
+        let longer = ComponentTimeline(days: [
+            DayStatus(date: day(0), level: .operational, tooltip: ""),
+            DayStatus(date: day(1), level: .majorOutage, tooltip: ""),
+            DayStatus(date: day(2), level: .operational, tooltip: "")
+        ], uptimePercent: 0)
+        // Shorter timeline covering only days 1–2; day 2 degraded.
+        let shorter = ComponentTimeline(days: [
+            DayStatus(date: day(1), level: .operational, tooltip: ""),
+            DayStatus(date: day(2), level: .degraded, tooltip: "")
+        ], uptimePercent: 0)
+
+        let result = ComponentTimeline.aggregate([longer, shorter], title: "group")
+
+        // Union of dates, sorted — not truncated to the shorter length. Index alignment
+        // would have folded the shorter timeline's day-2 degradation onto day 1.
+        XCTAssertEqual(result?.days.map(\.date), [day(0), day(1), day(2)])
+        XCTAssertEqual(result?.days.map(\.level), [.operational, .majorOutage, .degraded])
     }
 
     private func makeIsolatedDefaults(testName: String) -> UserDefaults {

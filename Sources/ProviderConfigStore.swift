@@ -6,11 +6,15 @@ final class ProviderConfigStore {
     private(set) var providers: [ProviderConfig]
     private let fileURL: URL
 
-    init(removedBuiltInIDs: Set<String> = []) {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let dir = appSupport.appendingPathComponent("MenuStatus", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        self.fileURL = dir.appendingPathComponent("providers.json")
+    init(removedBuiltInIDs: Set<String> = [], fileURL: URL? = nil) {
+        if let fileURL {
+            self.fileURL = fileURL
+        } else {
+            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            let dir = appSupport.appendingPathComponent("MenuStatus", isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            self.fileURL = dir.appendingPathComponent("providers.json")
+        }
         self.providers = ProviderConfig.builtInProviders.filter { !removedBuiltInIDs.contains($0.id) }
         loadFromDisk()
     }
@@ -36,6 +40,16 @@ final class ProviderConfigStore {
         providers.removeAll { $0.id == id }
         settings.disabledProviderIDs.remove(id)
         settings.providerOrder.removeAll { $0 == id }
+        // Clear the remaining per-provider state keyed by id. Without this, an alias /
+        // mute / group-expansion override is resurrected when the same status page is
+        // re-added later (detect() reuses the server-assigned page id), and these
+        // UserDefaults dictionaries accumulate dead keys over time.
+        settings.customProviderNames.removeValue(forKey: id)
+        settings.mutedProviderIDs.remove(id)
+        let expansionPrefix = "\(id):"
+        settings.groupExpansionOverrides = settings.groupExpansionOverrides.filter {
+            !$0.key.hasPrefix(expansionPrefix)
+        }
 
         if provider.isBuiltIn {
             settings.removedBuiltInIDs.insert(id)

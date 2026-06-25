@@ -638,7 +638,12 @@ struct ComponentTimeline {
         }
 
         let healthyDays = days.filter { $0.level == .operational }.count
-        let uptime = uptimePercentOverride ?? (Double(healthyDays) / Double(days.count) * 100.0)
+        // Exclude pre-availability `.noData` days from the denominator — they are not
+        // measured downtime. Counting them would wrongly drag uptime% down for any
+        // component whose history is shorter than the window.
+        let measuredDays = days.filter { $0.level != .noData }.count
+        let uptime = uptimePercentOverride
+            ?? (measuredDays > 0 ? Double(healthyDays) / Double(measuredDays) * 100.0 : 100.0)
         return ComponentTimeline(days: days, uptimePercent: uptime)
     }
 
@@ -677,29 +682,40 @@ struct ComponentTimeline {
         title: String,
         uptimePercentOverride: Double? = nil
     ) -> ComponentTimeline? {
-        guard let first = timelines.first else { return nil }
+        guard !timelines.isEmpty else { return nil }
 
         let formatter = DateFormatter()
         formatter.dateFormat = "M/d"
 
-        let aggregatedDays = first.days.enumerated().map { index, referenceDay in
-            let worstLevel: TimelineDayLevel = timelines
-                .compactMap { timeline -> TimelineDayLevel? in
-                    guard timeline.days.indices.contains(index) else { return nil }
-                    return timeline.days[index].level
+        // Align by calendar day, not array index. Sub-timelines can differ in length
+        // (Atlassian `.levels` arrays vary with how many uptime-day rects a component
+        // renders), so zipping by index misaligns days and truncates the group to the
+        // first sub-timeline's length. Take the worst level per day across the union.
+        var worstByDate: [Date: TimelineDayLevel] = [:]
+        for timeline in timelines {
+            for day in timeline.days {
+                if let existing = worstByDate[day.date] {
+                    worstByDate[day.date] = max(existing, day.level)
+                } else {
+                    worstByDate[day.date] = day.level
                 }
-                .max() ?? TimelineDayLevel.operational
+            }
+        }
 
-            let label = formatter.string(from: referenceDay.date)
+        let aggregatedDays = worstByDate.keys.sorted().map { date -> DayStatus in
+            let level = worstByDate[date] ?? .operational
+            let label = formatter.string(from: date)
             return DayStatus(
-                date: referenceDay.date,
-                level: worstLevel,
-                tooltip: "\(label): \(title) \(worstLevel.displayName)"
+                date: date,
+                level: level,
+                tooltip: "\(label): \(title) \(level.displayName)"
             )
         }
 
-        let healthyDays = aggregatedDays.filter { $0.level == TimelineDayLevel.operational }.count
-        let uptime = uptimePercentOverride ?? (Double(healthyDays) / Double(aggregatedDays.count) * 100.0)
+        let healthyDays = aggregatedDays.filter { $0.level == .operational }.count
+        let measuredDays = aggregatedDays.filter { $0.level != .noData }.count
+        let uptime = uptimePercentOverride
+            ?? (measuredDays > 0 ? Double(healthyDays) / Double(measuredDays) * 100.0 : 100.0)
         return ComponentTimeline(days: aggregatedDays, uptimePercent: uptime)
     }
 
@@ -712,18 +728,11 @@ struct ComponentTimeline {
         return calendar
     }
 
-    private static let startOfDayFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "yyyy-MM-dd"
-        return formatter
-    }()
-
     private static func startOfDay(from startDate: String?, calendar: Calendar) -> Date? {
-        guard let startDate,
-              let date = startOfDayFormatter.date(from: startDate) else { return nil }
+        // `availableSince` arrives as a full ISO-8601 timestamp (with or without
+        // fractional seconds), never a bare `yyyy-MM-dd`. Reuse the shared parser
+        // that handles both shapes, then snap to the provider-timezone day start.
+        guard let date = DateParsing.parseISODate(startDate) else { return nil }
         return calendar.startOfDay(for: date)
     }
 

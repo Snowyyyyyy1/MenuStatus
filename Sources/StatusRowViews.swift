@@ -80,6 +80,20 @@ struct ProviderSectionView: View {
         Divider()
             .padding(.horizontal, 16)
 
+        if store.historyUnavailableProviders.contains(provider) {
+            // History fetch failed and no cached timeline survived — tell the user instead
+            // of silently degrading to a bar-less list (which looks identical to "all good").
+            Label(
+                AppStrings.historyUnavailableHint(locale: locale),
+                systemImage: "exclamationmark.triangle"
+            )
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+        }
+
         if groupedSections.isEmpty {
             ForEach(visibleComponents) { component in
                 ComponentUptimeRow(

@@ -110,6 +110,50 @@ final class AIStupidLevelClientTests: XCTestCase {
         XCTAssertEqual(decoded.map(\.currentScore), [71, 65, nil, nil, nil])
     }
 
+    func testParseDashboardScoresResponseDecodesLossyConfidenceIntervalValues() throws {
+        // The CI fields share currentScore's union shape (Double | "unavailable" | null).
+        // A string value must not throw and blank the whole leaderboard.
+        let json = """
+        {
+          "success": true,
+          "data": [
+            {
+              "id": "1",
+              "name": "ci-unavailable",
+              "provider": "openai",
+              "currentScore": 71,
+              "trend": "stable",
+              "status": "good",
+              "confidenceLower": "unavailable",
+              "confidenceUpper": "unavailable",
+              "standardError": "unavailable"
+            },
+            {
+              "id": "2",
+              "name": "ci-numeric",
+              "provider": "anthropic",
+              "currentScore": 65,
+              "trend": "up",
+              "status": "good",
+              "confidenceLower": 49.1,
+              "confidenceUpper": 80.2,
+              "standardError": 6.9
+            }
+          ]
+        }
+        """
+
+        let decoded = try AIStupidLevelClient.decodeScores(Data(json.utf8))
+
+        XCTAssertEqual(decoded.count, 2)
+        XCTAssertNil(decoded[0].confidenceLower)
+        XCTAssertNil(decoded[0].confidenceUpper)
+        XCTAssertNil(decoded[0].standardError)
+        XCTAssertEqual(decoded[1].confidenceLower, 49.1)
+        XCTAssertEqual(decoded[1].confidenceUpper, 80.2)
+        XCTAssertEqual(decoded[1].standardError, 6.9)
+    }
+
     func testParseDashboardScoresResponseTreatsNonFiniteCurrentScoresAsNil() throws {
         let json = """
         {

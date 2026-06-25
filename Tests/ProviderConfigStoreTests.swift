@@ -7,6 +7,46 @@ final class ProviderConfigStoreTests: XCTestCase {
         super.tearDown()
     }
 
+    // MARK: - removeProvider cleanup
+
+    @MainActor
+    func testRemoveProviderClearsOrphanedPerProviderState() {
+        let suiteName = "ProviderConfigStoreTests.removeOrphans"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let tmpFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent("providers-\(UUID().uuidString).json")
+        addTeardownBlock {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: tmpFile)
+        }
+
+        let settings = SettingsStore(defaults: defaults)
+        let configStore = ProviderConfigStore(fileURL: tmpFile)
+        let custom = ProviderConfig(
+            id: "custom-1",
+            displayName: "Custom",
+            baseURL: URL(string: "https://status.example.com")!,
+            platform: .atlassianStatuspage,
+            isBuiltIn: false
+        )
+        configStore.addProvider(custom)
+
+        settings.customProviderNames[custom.id] = "My Alias"
+        settings.mutedProviderIDs.insert(custom.id)
+        settings.groupExpansionOverrides["\(custom.id):section-a"] = true
+        settings.providerOrder = [custom.id]
+
+        configStore.removeProvider(id: custom.id, settings: settings)
+
+        // All per-provider state keyed by id must be gone, not just disabled/order.
+        XCTAssertNil(settings.customProviderNames[custom.id])
+        XCTAssertFalse(settings.mutedProviderIDs.contains(custom.id))
+        XCTAssertNil(settings.groupExpansionOverrides["\(custom.id):section-a"])
+        XCTAssertFalse(settings.providerOrder.contains(custom.id))
+        XCTAssertNil(configStore.provider(for: custom.id))
+    }
+
     // MARK: - detectPlatform
 
     func testDetectPlatformReturnsAtlassianForPlainHTML() async throws {

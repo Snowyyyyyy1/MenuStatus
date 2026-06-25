@@ -390,6 +390,43 @@ final class AIStupidLevelStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testHoverCacheEvictsOldestEntriesBeyondMaxEntries() async {
+        let defaults = makeIsolatedDefaults(testName: #function)
+        var clock = Date(timeIntervalSince1970: 0)
+        let store = AIStupidLevelStore(defaults: defaults, now: { clock })
+
+        let fetcher = AIStupidLevelStore.Fetcher(
+            fetchScores: { [] },
+            fetchGlobalIndex: { self.makeGlobalIndex(score: 0) },
+            fetchDashboardAlerts: { [] },
+            fetchBatchStatus: { DashboardBatchStatusData(isBatchInProgress: nil, schedulerRunning: nil, nextScheduledRun: nil) },
+            fetchRecommendations: { AnalyticsRecommendationsPayload(bestForCode: nil, mostReliable: nil, fastestResponse: nil, avoidNow: []) },
+            fetchDegradations: { [] },
+            fetchProviderReliability: { [] },
+            fetchModelDetail: { _ in self.makeModelDetail() },
+            fetchModelStats: { _ in self.makeModelStats() },
+            fetchModelHistory: { _ in self.makeModelHistory() }
+        )
+
+        // Load 26 distinct models (cap is 24), each with a strictly newer timestamp.
+        for i in 0..<26 {
+            clock = Date(timeIntervalSince1970: TimeInterval(i))
+            await store.loadHoverDataIfNeeded(modelId: "model-\(i)", fetcher: fetcher)
+        }
+
+        // Cap is exact (insert-then-enforce, not off-by-one at 25), and all three caches
+        // stay bounded together.
+        XCTAssertEqual(store.modelDetailsByID.count, 24)
+        XCTAssertEqual(store.modelStatsByModelID.count, 24)
+        XCTAssertEqual(store.historyByModelID.count, 24)
+        // The two genuinely oldest were evicted; newest retained.
+        XCTAssertNil(store.modelDetailsByID["model-0"])
+        XCTAssertNil(store.modelDetailsByID["model-1"])
+        XCTAssertNotNil(store.modelDetailsByID["model-2"])
+        XCTAssertNotNil(store.modelDetailsByID["model-25"])
+    }
+
+    @MainActor
     func testLoadHoverDataIfNeededKeepsSuccessfulPartialDataWhenOneEndpointFails() async {
         let store = makeIsolatedStore(testName: #function)
 

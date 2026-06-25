@@ -79,9 +79,12 @@ struct BenchmarkScore: Codable, Identifiable, Hashable {
         currentScore = try BenchmarkLossyNumericDecoder.decodeOptionalDouble(from: container, forKey: .currentScore)
         trend = try container.decode(BenchmarkTrend.self, forKey: .trend)
         status = try container.decode(BenchmarkStatus.self, forKey: .status)
-        confidenceLower = try container.decodeIfPresent(Double.self, forKey: .confidenceLower)
-        confidenceUpper = try container.decodeIfPresent(Double.self, forKey: .confidenceUpper)
-        standardError = try container.decodeIfPresent(Double.self, forKey: .standardError)
+        // These share the same union shape as currentScore (Double | "unavailable" | null);
+        // decoding them as a plain Double would throw typeMismatch on the string form and
+        // fail the whole scores array, blanking the leaderboard. Decode them leniently too.
+        confidenceLower = try BenchmarkLossyNumericDecoder.decodeOptionalDouble(from: container, forKey: .confidenceLower)
+        confidenceUpper = try BenchmarkLossyNumericDecoder.decodeOptionalDouble(from: container, forKey: .confidenceUpper)
+        standardError = try BenchmarkLossyNumericDecoder.decodeOptionalDouble(from: container, forKey: .standardError)
         isStale = try container.decodeIfPresent(Bool.self, forKey: .isStale)
         lastUpdated = try container.decodeIfPresent(String.self, forKey: .lastUpdated)
     }

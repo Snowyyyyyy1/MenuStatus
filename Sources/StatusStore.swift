@@ -43,6 +43,10 @@ final class StatusStore {
     var lastRefreshed: Date?
     var isLoading = false
     var errorMessage: String?
+    /// Providers whose official-history fetch failed AND have no cached timeline to fall
+    /// back on. Used to show an explicit "history unavailable, refresh" hint instead of
+    /// silently degrading to a bar-less flat component list.
+    private(set) var historyUnavailableProviders: Set<ProviderConfig> = []
     private(set) var isConnected = true
     private var mutedSnapshots: [String: StatusIndicator] = [:]
 
@@ -94,14 +98,16 @@ final class StatusStore {
         startPollingLoop()
     }
 
-    private func startPollingLoop() {
+    private func startPollingLoop(fetchImmediately: Bool = true) {
         pollingTask?.cancel()
         pollingTask = Task { [weak self] in
             guard let self else { return }
+            var shouldFetch = fetchImmediately
             while !Task.isCancelled {
-                if self.isConnected {
+                if shouldFetch, self.isConnected {
                     await self.refreshNow()
                 }
+                shouldFetch = true
                 do {
                     try await Task.sleep(for: .seconds(self.settings.refreshInterval))
                 } catch {
@@ -115,9 +121,10 @@ final class StatusStore {
         let isStale = lastRefreshed.map { now().timeIntervalSince($0) > Self.popoverStaleThreshold } ?? true
         guard isStale else { return }
         await refreshNow()
-        // Reset polling sleep so the next tick fires `refreshInterval` from now,
-        // not from whenever the previous tick happened — avoids back-to-back fetches.
-        startPollingLoop()
+        // Reset the polling sleep so the next automatic tick fires `refreshInterval`
+        // from now. Skip the loop's immediate fetch — we just refreshed above, and the
+        // loop body otherwise fetches before its first sleep, causing a back-to-back fetch.
+        startPollingLoop(fetchImmediately: false)
     }
 
     func stopPolling() {
@@ -275,6 +282,11 @@ final class StatusStore {
         componentTimelines = derivedState.timelines
         groupedSections = derivedState.sections
         incidentLookup = builtIncidentLookup
+        // Flag history failures only when they actually degraded the view — i.e. there is
+        // no cached timeline to fall back on. With cached data we keep showing it silently.
+        historyUnavailableProviders = fetchResults.historyFetchFailed.filter {
+            (derivedState.timelines[$0] ?? [:]).isEmpty
+        }
         lastRefreshed = now()
         persistSnapshot(
             summaries: fetchResults.summaries,
@@ -293,6 +305,7 @@ final class StatusStore {
         var maintenances: [ProviderConfig: [Incident]] = [:]
         var historyPageIncidents: [ProviderConfig: [HistoryPageIncident]] = [:]
         var errors: [String] = []
+        var historyFetchFailed: Set<ProviderConfig> = []
     }
 
     nonisolated private static func fetchAllProviderData(
@@ -330,16 +343,20 @@ final class StatusStore {
                     }
                 }
 
-                group.addTask {
-                    do {
-                        let incidents = try await fetcher.fetchIncidents(provider)
-                        return .incidents(provider, .success(incidents))
-                    } catch {
-                        return .incidents(provider, .failure(error))
-                    }
-                }
-
+                // Only Atlassian Statuspage consumes per-component incidents in
+                // buildIncidentLookup. incident.io's incidents API lacks
+                // affected_components, and Flashduty returns nothing here — so fetching
+                // incidents for those platforms is a wasted request every poll cycle.
                 if provider.effectivePlatform == .atlassianStatuspage {
+                    group.addTask {
+                        do {
+                            let incidents = try await fetcher.fetchIncidents(provider)
+                            return .incidents(provider, .success(incidents))
+                        } catch {
+                            return .incidents(provider, .failure(error))
+                        }
+                    }
+
                     group.addTask {
                         do {
                             let maintenances = try await fetcher.fetchScheduledMaintenances(provider)
@@ -368,8 +385,8 @@ final class StatusStore {
                     results.errors.append("\(provider.displayName): \(error.localizedDescription)")
                 case .officialHistory(let provider, .success(let history)):
                     results.officialHistories[provider] = history
-                case .officialHistory(_, .failure):
-                    break
+                case .officialHistory(let provider, .failure):
+                    results.historyFetchFailed.insert(provider)
                 case .incidents(let provider, .success(let incidents)):
                     results.incidents[provider] = incidents
                 case .incidents(_, .failure):

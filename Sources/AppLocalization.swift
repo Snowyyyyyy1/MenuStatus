@@ -316,6 +316,14 @@ enum AppStrings {
         localizedString("provider.unmute", locale: locale, defaultValue: "Unignore status")
     }
 
+    static func historyUnavailableHint(locale: Locale) -> String {
+        localizedString(
+            "provider.history-unavailable",
+            locale: locale,
+            defaultValue: "Couldn't load uptime history — tap refresh to retry"
+        )
+    }
+
     static func unknownLabel(locale: Locale) -> String {
         localizedString("common.unknown", locale: locale, defaultValue: "Unknown")
     }

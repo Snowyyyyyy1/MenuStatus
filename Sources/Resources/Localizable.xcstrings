@@ -2245,6 +2245,23 @@
         }
       }
     },
+    "provider.history-unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't load uptime history — tap refresh to retry"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法加载运行历史 — 点击刷新重试"
+          }
+        }
+      }
+    },
     "provider.mute" : {
       "extractionState" : "manual",
       "localizations" : {
