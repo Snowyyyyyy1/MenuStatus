@@ -59,16 +59,65 @@ final class MenuChromeTests: XCTestCase {
         XCTAssertFalse(delegate.applicationShouldTerminateAfterLastWindowClosed(NSApplication.shared))
     }
 
-    @MainActor
-    func testSettingsSceneBridgePostsOpenNotification() {
-        let expectation = expectation(
-            forNotification: SettingsSceneBridge.openNotification,
-            object: nil
+    func testSettingsSceneBridgePrefersNativeSettingsAction() {
+        var nativeActionCount = 0
+        var fallbackCount = 0
+
+        SettingsSceneBridge.performOpenRequest(
+            sendNativeAction: {
+                nativeActionCount += 1
+                return true
+            },
+            postFallbackNotification: {
+                fallbackCount += 1
+            }
         )
 
-        SettingsSceneBridge.requestOpen()
+        XCTAssertEqual(nativeActionCount, 1)
+        XCTAssertEqual(fallbackCount, 0)
+    }
 
-        wait(for: [expectation], timeout: 0.2)
+    func testSettingsSceneBridgeFallsBackWhenNativeActionIsUnavailable() {
+        var fallbackCount = 0
+
+        SettingsSceneBridge.performOpenRequest(
+            sendNativeAction: { false },
+            postFallbackNotification: {
+                fallbackCount += 1
+            }
+        )
+
+        XCTAssertEqual(fallbackCount, 1)
+    }
+
+    func testSettingsSceneBridgeFindsCommandCommaSettingsItem() {
+        let mainMenu = NSMenu()
+        let appItem = NSMenuItem(title: "MenuStatus", action: nil, keyEquivalent: "")
+        let appMenu = NSMenu()
+        let settingsItem = NSMenuItem(
+            title: "Settings…",
+            action: Selector(("testAction:")),
+            keyEquivalent: ","
+        )
+        settingsItem.keyEquivalentModifierMask = .command
+        appMenu.addItem(settingsItem)
+        appItem.submenu = appMenu
+        mainMenu.addItem(appItem)
+
+        XCTAssertTrue(SettingsSceneBridge.settingsMenuItem(in: mainMenu) === settingsItem)
+    }
+
+    func testSettingsSceneBridgeIgnoresNonCommandCommaItems() {
+        let menu = NSMenu()
+        let item = NSMenuItem(
+            title: "Comma",
+            action: Selector(("testAction:")),
+            keyEquivalent: ","
+        )
+        item.keyEquivalentModifierMask = []
+        menu.addItem(item)
+
+        XCTAssertNil(SettingsSceneBridge.settingsMenuItem(in: menu))
     }
 
     func testSettingsProviderSelectionDefaultsToFirstProvider() {

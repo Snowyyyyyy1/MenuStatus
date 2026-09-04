@@ -11,7 +11,58 @@ enum SettingsSceneBridge {
     @MainActor
     static func requestOpen() {
         NSApp.activate(ignoringOtherApps: true)
-        NotificationCenter.default.post(name: openNotification, object: nil)
+        performOpenRequest(
+            sendNativeAction: {
+                sendNativeSettingsAction(application: NSApp)
+            },
+            postFallbackNotification: {
+                NotificationCenter.default.post(name: openNotification, object: nil)
+            }
+        )
+    }
+
+    static func performOpenRequest(
+        sendNativeAction: () -> Bool,
+        postFallbackNotification: () -> Void
+    ) {
+        if !sendNativeAction() {
+            postFallbackNotification()
+        }
+    }
+
+    @MainActor
+    static func sendNativeSettingsAction(application: NSApplication) -> Bool {
+        // macOS 27 beta can no-op the Settings scene APIs while the SwiftUI
+        // command-comma menu callback remains functional.
+        if let item = settingsMenuItem(in: application.mainMenu),
+           let action = item.action,
+           application.sendAction(action, to: item.target, from: item) {
+            return true
+        }
+
+        return application.sendAction(
+            Selector(("showSettingsWindow:")),
+            to: nil,
+            from: nil
+        )
+    }
+
+    static func settingsMenuItem(in menu: NSMenu?) -> NSMenuItem? {
+        guard let menu else { return nil }
+
+        for item in menu.items {
+            if item.keyEquivalent == ",",
+               item.keyEquivalentModifierMask.contains(.command),
+               item.action != nil {
+                return item
+            }
+
+            if let match = settingsMenuItem(in: item.submenu) {
+                return match
+            }
+        }
+
+        return nil
     }
 
     @MainActor
