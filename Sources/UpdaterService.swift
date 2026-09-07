@@ -23,7 +23,38 @@ enum UpdaterAvailability: Equatable {
         case .buildProducts:
             "In-app updates are unavailable in local build products."
         case .notInstalledToApplications:
-            "Install MenuStatus to /Applications to enable in-app updates."
+            "Install MenuStatus to /Applications or ~/Applications to enable in-app updates."
+        }
+    }
+
+    func localizedDiagnosticMessage(locale: Locale) -> String? {
+        switch self {
+        case .available:
+            nil
+        case .missingFeedURL:
+            AppStrings.localizedString(
+                "updater.diagnostic.missing-feed",
+                locale: locale,
+                defaultValue: "Missing update feed configuration in this build."
+            )
+        case .missingPublicKey:
+            AppStrings.localizedString(
+                "updater.diagnostic.missing-key",
+                locale: locale,
+                defaultValue: "Missing update signing key in this build."
+            )
+        case .buildProducts:
+            AppStrings.localizedString(
+                "updater.diagnostic.build-products",
+                locale: locale,
+                defaultValue: "In-app updates are unavailable in local build products."
+            )
+        case .notInstalledToApplications:
+            AppStrings.localizedString(
+                "updater.diagnostic.not-installed",
+                locale: locale,
+                defaultValue: "Install MenuStatus in /Applications or ~/Applications to enable in-app updates."
+            )
         }
     }
 }
@@ -70,7 +101,14 @@ struct UpdaterConfiguration: Equatable {
     private var isInstalledToApplications: Bool {
         guard isAppBundle else { return false }
         let normalizedPath = URL(fileURLWithPath: bundlePath).standardizedFileURL.path
-        return normalizedPath.hasPrefix("/Applications/")
+        let applicationsDirectories = FileManager.default.urls(
+            for: .applicationDirectory,
+            in: [.localDomainMask, .userDomainMask]
+        )
+        return applicationsDirectories.contains { directory in
+            let normalizedDirectory = directory.standardizedFileURL.path
+            return normalizedPath.hasPrefix(normalizedDirectory + "/")
+        }
     }
 
     private var isAppBundle: Bool {
@@ -157,6 +195,27 @@ final class UpdaterChannelDelegate: NSObject, SPUUpdaterDelegate {
         }
         if !(updater?.canCheckForUpdates ?? false) {
             return "Update checks are temporarily unavailable."
+        }
+        return nil
+    }
+
+    func diagnosticMessage(locale: Locale) -> String? {
+        if startupErrorMessage != nil {
+            return AppStrings.localizedString(
+                "updater.diagnostic.startup-failure",
+                locale: locale,
+                defaultValue: "Sparkle failed to start in this build."
+            )
+        }
+        if availability != .available {
+            return availability.localizedDiagnosticMessage(locale: locale)
+        }
+        if !(updater?.canCheckForUpdates ?? false) {
+            return AppStrings.localizedString(
+                "updater.diagnostic.unavailable",
+                locale: locale,
+                defaultValue: "Update checks are temporarily unavailable."
+            )
         }
         return nil
     }

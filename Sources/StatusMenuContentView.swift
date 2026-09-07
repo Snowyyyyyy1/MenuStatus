@@ -373,7 +373,7 @@ struct StatusMenuContentView: View {
         MenuErrorPresentation.messages(
             for: activeSelection,
             statusError: store.errorMessage,
-            benchmarkError: benchmarkStore.errorMessage
+            benchmarkError: benchmarkStore.userFacingErrorMessage(locale: locale) ?? benchmarkStore.errorMessage
         )
     }
 
@@ -457,7 +457,14 @@ struct StatusMenuContentView: View {
                 // Footer
                 HStack {
                     if !store.isConnected {
-                        Label("menu.offline", systemImage: "wifi.slash")
+                        Label(
+                            AppStrings.localizedString(
+                                "menu.offline",
+                                locale: locale,
+                                defaultValue: "Offline"
+                            ),
+                            systemImage: "wifi.slash"
+                        )
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else if let date = activeLastRefreshed {
@@ -582,7 +589,8 @@ struct StatusMenuContentView: View {
                     score: score,
                     detail: benchmarkStore.modelDetailsByID[score.id],
                     stats: benchmarkStore.modelStatsByModelID[score.id],
-                    history: benchmarkStore.historyByModelID[score.id]
+                    history: benchmarkStore.historyByModelID[score.id],
+                    errorMessage: benchmarkStore.userFacingHoverErrorMessage(for: score.id, locale: locale)
                 )
                 .fixedSize(horizontal: false, vertical: true)
                 .background {
@@ -696,7 +704,8 @@ struct StatusMenuContentView: View {
                             await MainActor.run {
                                 guard case .benchmark = activeSelection,
                                       pendingBenchmarkHoverInfo?.score.id == modelId,
-                                      benchmarkStore.hasResolvedHoverPayload(for: modelId)
+                                      (benchmarkStore.hasResolvedHoverPayload(for: modelId)
+                                       || benchmarkStore.userFacingHoverErrorMessage(for: modelId, locale: locale) != nil)
                                 else {
                                     return
                                 }
@@ -708,6 +717,8 @@ struct StatusMenuContentView: View {
                 )
             } else if benchmarkStore.isLoading {
                 loadingPlaceholder
+            } else if store.settings.benchmarkAPIKey.isEmpty {
+                benchmarkSetupPlaceholder
             } else {
                 emptyPlaceholder(
                     message: AppStrings.localizedString(
@@ -729,6 +740,46 @@ struct StatusMenuContentView: View {
                 loadingPlaceholder
             }
         }
+    }
+
+    private var benchmarkSetupPlaceholder: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "key.fill")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+            Text(AppStrings.localizedString(
+                "benchmark.setup.title",
+                locale: locale,
+                defaultValue: "Connect benchmark data"
+            ))
+                .font(.headline)
+            Text(AppStrings.localizedString(
+                "benchmark.setup.message",
+                locale: locale,
+                defaultValue: "Add an API key in Settings to load AI Stupid Level results."
+            ))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(AppStrings.localizedString(
+                "benchmark.setup.open-settings",
+                locale: locale,
+                defaultValue: "Open Settings"
+            )) {
+                hostCoordinator.openSettings()
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .focusable(false)
+            Link(
+                "aistupidlevel.info",
+                destination: AIStupidLevelClient.apiDocsURL
+            )
+            .font(.caption)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
     }
 
     private var loadingPlaceholder: some View {

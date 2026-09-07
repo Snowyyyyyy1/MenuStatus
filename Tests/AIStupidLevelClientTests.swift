@@ -56,6 +56,39 @@ final class AIStupidLevelClientTests: XCTestCase {
         XCTAssertEqual(decoded[1].status, .warning)
     }
 
+    func testParseDashboardScoresResponseDecodesSnakeCaseFields() throws {
+        let json = """
+        {
+          "success": true,
+          "data": [
+            {
+              "id": "snake-1",
+              "name": "snake-model",
+              "provider": "openai",
+              "current_score": 73,
+              "trend": "stable",
+              "status": "good",
+              "confidence_lower": 61,
+              "confidence_upper": 82,
+              "standard_error": 4.5,
+              "is_stale": false,
+              "last_updated": "2026-09-06T00:00:00Z"
+            }
+          ]
+        }
+        """
+
+        let decoded = try AIStupidLevelClient.decodeScores(Data(json.utf8))
+
+        XCTAssertEqual(decoded.count, 1)
+        XCTAssertEqual(decoded[0].currentScore, 73)
+        XCTAssertEqual(decoded[0].confidenceLower, 61)
+        XCTAssertEqual(decoded[0].confidenceUpper, 82)
+        XCTAssertEqual(decoded[0].standardError, 4.5)
+        XCTAssertEqual(decoded[0].isStale, false)
+        XCTAssertEqual(decoded[0].lastUpdated, "2026-09-06T00:00:00Z")
+    }
+
     func testParseDashboardScoresResponseDecodesLossyCurrentScoreValues() throws {
         let json = """
         {

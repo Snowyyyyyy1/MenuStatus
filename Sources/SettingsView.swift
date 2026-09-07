@@ -225,6 +225,7 @@ private struct GeneralSettingsPane: View {
     let intervalOptions: [TimeInterval]
 
     @Environment(\.locale) private var locale
+    @State private var benchmarkAPIKeyDraft = ""
 
     var body: some View {
         SettingsScrollPane {
@@ -244,6 +245,17 @@ private struct GeneralSettingsPane: View {
                     ),
                     binding: $settings.launchAtLogin
                 )
+
+                if settings.launchAtLoginErrorMessage != nil {
+                    Text(AppStrings.localizedString(
+                        "settings.error.launch-at-login",
+                        locale: locale,
+                        defaultValue: "macOS did not enable Launch at Login. Open System Settings and try again."
+                    ))
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             Divider()
@@ -327,6 +339,100 @@ private struct GeneralSettingsPane: View {
                     ),
                     binding: $settings.showBenchmark
                 )
+
+                PreferenceControlRow(
+                    title: AppStrings.localizedString(
+                        "settings.benchmark.refresh.label",
+                        locale: locale,
+                        defaultValue: "Benchmark refresh interval"
+                    ),
+                    subtitle: AppStrings.localizedString(
+                        "settings.benchmark.refresh.helper",
+                        locale: locale,
+                        defaultValue: "Use a slower interval to respect the benchmark API quota."
+                    )
+                ) {
+                    Picker(
+                        AppStrings.localizedString(
+                            "settings.benchmark.refresh.label",
+                            locale: locale,
+                            defaultValue: "Benchmark refresh interval"
+                        ),
+                        selection: $settings.benchmarkRefreshInterval
+                    ) {
+                        ForEach(SettingsStore.benchmarkRefreshIntervalOptions, id: \.self) { value in
+                            Text(AppStrings.benchmarkRefreshIntervalLabel(value, locale: locale))
+                                .tag(value)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .fixedSize()
+                    .controlSize(.small)
+                    .focusable(false)
+                }
+
+                PreferenceControlRow(
+                    title: AppStrings.localizedString(
+                        "settings.benchmark.api-key.label",
+                        locale: locale,
+                        defaultValue: "Benchmark API key"
+                    ),
+                    subtitle: AppStrings.localizedString(
+                        "settings.benchmark.api-key.helper",
+                        locale: locale,
+                        defaultValue: "Stored securely in your macOS Keychain."
+                    )
+                ) {
+                    VStack(alignment: .trailing, spacing: 5) {
+                        HStack(spacing: 6) {
+                            SecureField(
+                                AppStrings.localizedString(
+                                    "settings.benchmark.api-key.placeholder",
+                                    locale: locale,
+                                    defaultValue: "Paste API key"
+                                ),
+                                text: $benchmarkAPIKeyDraft
+                            )
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 170, height: 22)
+                            .onSubmit { saveBenchmarkAPIKey() }
+
+                            Button(AppStrings.localizedString(
+                                "settings.benchmark.api-key.save",
+                                locale: locale,
+                                defaultValue: "Save"
+                            )) {
+                                saveBenchmarkAPIKey()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .focusable(false)
+                            .disabled(normalizedBenchmarkAPIKeyDraft == settings.benchmarkAPIKey)
+                        }
+
+                        Link(
+                            AppStrings.localizedString(
+                                "settings.benchmark.api-key.docs",
+                                locale: locale,
+                                defaultValue: "API documentation"
+                            ),
+                            destination: AIStupidLevelClient.apiDocsURL
+                        )
+                        .font(.footnote)
+
+                        if settings.benchmarkAPIKeyErrorMessage != nil {
+                            Text(AppStrings.localizedString(
+                                "settings.error.keychain",
+                                locale: locale,
+                                defaultValue: "Could not save the API key to Keychain."
+                            ))
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
             }
 
             Divider()
@@ -369,6 +475,18 @@ private struct GeneralSettingsPane: View {
                 }
             }
         }
+        .onAppear {
+            settings.refreshLaunchAtLoginState()
+            benchmarkAPIKeyDraft = settings.benchmarkAPIKey
+        }
+    }
+
+    private var normalizedBenchmarkAPIKeyDraft: String {
+        benchmarkAPIKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func saveBenchmarkAPIKey() {
+        settings.benchmarkAPIKey = normalizedBenchmarkAPIKeyDraft
     }
 }
 
@@ -376,6 +494,7 @@ private struct ProviderSettingsPane: View {
     @Bindable var settings: SettingsStore
     var store: StatusStore?
 
+    @Environment(\.locale) private var locale
     @State private var selectedProviderID: String?
 
     private var orderedProviders: [ProviderConfig] {
@@ -403,7 +522,11 @@ private struct ProviderSettingsPane: View {
                     provider: provider
                 )
             } else {
-                Text("No providers")
+                Text(AppStrings.localizedString(
+                    "settings.providers.none",
+                    locale: locale,
+                    defaultValue: "No providers"
+                ))
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -504,7 +627,7 @@ private struct UpdateSettingsPane: View {
                     .disabled(!updaterService.isAvailable || !updaterService.canCheckForUpdates)
                     .focusable(false)
 
-                    if let diagnosticMessage = updaterService.diagnosticMessage {
+                    if let diagnosticMessage = updaterService.diagnosticMessage(locale: locale) {
                         Text(diagnosticMessage)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -572,8 +695,8 @@ private struct AboutSettingsPane: View {
                 Text(
                     SettingsCopy.literal(
                         locale: locale,
-                        english: "Open-source status monitor for incident.io and Statuspage services.",
-                        chinese: "面向 incident.io 与 Statuspage 服务的开源状态栏监控工具。"
+                        english: "Open-source status monitor for Statuspage, incident.io, and Flashduty services, with an AI benchmark view.",
+                        chinese: "面向 Statuspage、incident.io 和 Flashduty 服务的开源状态栏监控工具，并提供 AI 评测视图。"
                     )
                 )
                 .font(.footnote)
@@ -719,12 +842,25 @@ private struct ProviderSidebarList: View {
 
             Divider()
 
+            if settings.providerConfigs.persistenceErrorMessage != nil {
+                Text(AppStrings.localizedString(
+                    "settings.providers.persistence-error",
+                    locale: locale,
+                    defaultValue: "Could not save provider changes. Check the application support folder permissions."
+                ))
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
+            }
+
             SettingsSection(
                 title: SettingsCopy.literal(locale: locale, english: "Add Provider", chinese: "添加服务源"),
                 caption: AppStrings.localizedString(
                     "settings.helper.discovery",
                     locale: locale,
-                    defaultValue: "Supports Atlassian Statuspage and incident.io URLs."
+                    defaultValue: "Supports Atlassian Statuspage, incident.io, and Flashduty URLs."
                 ),
                 contentSpacing: 10
             ) {
@@ -1069,7 +1205,7 @@ private struct AddProviderRow: View {
             errorMessage = AppStrings.localizedString(
                 "settings.providers.detect-failure",
                 locale: locale,
-                defaultValue: "Could not detect status page. Make sure it uses Statuspage or incident.io."
+                defaultValue: "Could not detect status page. Make sure it uses Statuspage, incident.io, or Flashduty."
             )
         }
     }

@@ -10,6 +10,23 @@ final class SettingsStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testBenchmarkRefreshIntervalDefaultsToOneHour() {
+        let defaults = makeIsolatedDefaults(testName: #function)
+        let settings = SettingsStore(defaults: defaults)
+
+        XCTAssertEqual(settings.benchmarkRefreshInterval, SettingsStore.defaultBenchmarkRefreshInterval)
+    }
+
+    @MainActor
+    func testBenchmarkRefreshIntervalPersistsAcrossStoreRecreation() {
+        let defaults = makeIsolatedDefaults(testName: #function)
+        let settings = SettingsStore(defaults: defaults)
+        settings.benchmarkRefreshInterval = 21_600
+
+        XCTAssertEqual(SettingsStore(defaults: defaults).benchmarkRefreshInterval, 21_600)
+    }
+
+    @MainActor
     func testShowBenchmarkPersistsAcrossStoreRecreation() {
         let defaults = makeIsolatedDefaults(testName: #function)
 

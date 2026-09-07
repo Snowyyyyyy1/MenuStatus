@@ -11,7 +11,12 @@ enum MenuBarIconStyle: Int, CaseIterable {
 @MainActor
 @Observable
 final class SettingsStore {
+    static let defaultBenchmarkRefreshInterval: TimeInterval = 3600
+    static let benchmarkRefreshIntervalOptions: [TimeInterval] = [3600, 21600, 86400]
+
     private let defaults: UserDefaults
+    private var benchmarkAPIKeyValue: String
+    private var isApplyingLaunchAtLogin = false
 
     var languagePreference: AppLanguagePreference {
         didSet { defaults.set(languagePreference.rawValue, forKey: Keys.languagePreference) }
@@ -21,12 +26,25 @@ final class SettingsStore {
         didSet { defaults.set(refreshInterval, forKey: Keys.refreshInterval) }
     }
 
-    var launchAtLogin: Bool {
+    var benchmarkRefreshInterval: TimeInterval {
         didSet {
-            defaults.set(launchAtLogin, forKey: Keys.launchAtLogin)
-            updateLoginItem()
+            let normalized = max(60, benchmarkRefreshInterval)
+            if benchmarkRefreshInterval != normalized {
+                benchmarkRefreshInterval = normalized
+                return
+            }
+            defaults.set(normalized, forKey: Keys.benchmarkRefreshInterval)
         }
     }
+
+    var launchAtLogin: Bool {
+        didSet {
+            guard !isApplyingLaunchAtLogin else { return }
+            applyLaunchAtLoginChange(requested: launchAtLogin, previous: oldValue)
+        }
+    }
+
+    private(set) var launchAtLoginErrorMessage: String?
 
     var disabledProviderIDs: Set<String> {
         didSet {
@@ -78,6 +96,33 @@ final class SettingsStore {
         didSet { defaults.set(showBenchmark, forKey: Keys.showBenchmark) }
     }
 
+    var benchmarkAPIKey: String {
+        get { benchmarkAPIKeyValue }
+        set {
+            let normalized = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard normalized != benchmarkAPIKeyValue else { return }
+            do {
+                try BenchmarkAPIKeyStore.save(normalized)
+                benchmarkAPIKeyValue = normalized
+                benchmarkAPIKeyErrorMessage = nil
+            } catch {
+                benchmarkAPIKeyErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private(set) var benchmarkAPIKeyErrorMessage: String?
+
+    var launchAtLoginStatus: SMAppService.Status {
+        SMAppService.mainApp.status
+    }
+
+    func refreshLaunchAtLoginState() {
+        let isEnabled = SMAppService.mainApp.status == .enabled
+        setLaunchAtLoginValue(isEnabled)
+        defaults.set(isEnabled, forKey: Keys.launchAtLogin)
+    }
+
     func isMuted(_ provider: ProviderConfig) -> Bool {
         mutedProviderIDs.contains(provider.id)
     }
@@ -123,7 +168,14 @@ final class SettingsStore {
             self.refreshInterval = 60
         }
 
+        if let interval = defaults.object(forKey: Keys.benchmarkRefreshInterval) as? TimeInterval, interval > 0 {
+            self.benchmarkRefreshInterval = max(60, interval)
+        } else {
+            self.benchmarkRefreshInterval = Self.defaultBenchmarkRefreshInterval
+        }
+
         self.launchAtLogin = defaults.bool(forKey: Keys.launchAtLogin)
+        self.launchAtLoginErrorMessage = nil
 
         if let ids = defaults.stringArray(forKey: Keys.disabledProviderIDs) {
             self.disabledProviderIDs = Set(ids)
@@ -140,6 +192,9 @@ final class SettingsStore {
         self.mutedProviderIDs = Set(defaults.stringArray(forKey: Keys.mutedProviderIDs) ?? [])
         self.allowsBetaUpdates = defaults.bool(forKey: Keys.allowsBetaUpdates)
         self.showBenchmark = defaults.object(forKey: Keys.showBenchmark) as? Bool ?? true
+        self.benchmarkAPIKeyValue = BenchmarkAPIKeyStore.load() ?? ""
+        self.benchmarkAPIKeyErrorMessage = nil
+        refreshLaunchAtLoginState()
     }
 
     func attachProviderConfigs(_ store: ProviderConfigStore) {
@@ -160,17 +215,47 @@ final class SettingsStore {
         }
     }
 
-    private func updateLoginItem() {
-        if launchAtLogin {
-            try? SMAppService.mainApp.register()
-        } else {
-            try? SMAppService.mainApp.unregister()
+    private func applyLaunchAtLoginChange(requested: Bool, previous: Bool) {
+        do {
+            if requested {
+                try SMAppService.mainApp.register()
+                guard SMAppService.mainApp.status == .enabled else {
+                    throw LaunchAtLoginError.requiresApproval
+                }
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+            launchAtLoginErrorMessage = nil
+            defaults.set(requested, forKey: Keys.launchAtLogin)
+        } catch {
+            launchAtLoginErrorMessage = error.localizedDescription
+            setLaunchAtLoginValue(previous)
+            defaults.set(previous, forKey: Keys.launchAtLogin)
+        }
+    }
+
+    private func setLaunchAtLoginValue(_ value: Bool) {
+        guard launchAtLogin != value else { return }
+        isApplyingLaunchAtLogin = true
+        launchAtLogin = value
+        isApplyingLaunchAtLogin = false
+    }
+
+    private enum LaunchAtLoginError: LocalizedError {
+        case requiresApproval
+
+        var errorDescription: String? {
+            switch self {
+            case .requiresApproval:
+                return "macOS requires approval before MenuStatus can launch at login"
+            }
         }
     }
 
     private enum Keys {
         static let languagePreference = "languagePreference"
         static let refreshInterval = "refreshInterval"
+        static let benchmarkRefreshInterval = "benchmarkRefreshInterval"
         static let launchAtLogin = "launchAtLogin"
         static let disabledProviderIDs = "disabledProviderIDs"
         static let iconStyle = "iconStyle"

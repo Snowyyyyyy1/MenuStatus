@@ -14,11 +14,11 @@
   <img alt="Platform macOS 14+" src="https://img.shields.io/badge/platform-macOS%2014%2B-black">
 </p>
 
-一个原生的 macOS 菜单栏应用，用来查看两类受支持的公开状态页，以及内置的 AI 基准快照视图。
+一个原生的 macOS 菜单栏应用，用来查看三类受支持的公开状态页，以及内置的 AI 基准快照视图。
 
 MenuStatus 主要有两个视图：
 
-- **状态页视图**：解析基于 **[Atlassian Statuspage](https://www.atlassian.com/software/statuspage)** 和 **[incident.io](https://incident.io/status-pages)** 的公开状态页
+- **状态页视图**：解析基于 **[Atlassian Statuspage](https://www.atlassian.com/software/statuspage)**、**[incident.io](https://incident.io/status-pages)** 和 Flashduty/Flashcat 的公开状态页
 - **[AI Stupid Level](https://www.aistupidlevel.info/) 视图**：查看 global index、模型排行、厂商对比、recommendations、alerts 和 degradations
 
 <p align="center">
@@ -45,12 +45,13 @@ MenuStatus 主要有两个视图：
 
 ### 状态页视图
 
-MenuStatus 不是一个可以解析任意网站的通用状态监控器。目前只支持两种状态页平台：
+MenuStatus 不是一个可以解析任意网站的通用状态监控器。目前只支持三种状态页平台：
 
 - **[Atlassian Statuspage](https://www.atlassian.com/software/statuspage)**
 - **[incident.io](https://incident.io/status-pages)**
+- **Flashduty / Flashcat HTML 状态页**
 
-内置 provider 包括 **OpenAI** 和 **Anthropic**。你也可以添加其他兼容的状态页 URL，例如 GitHub、Cloudflare、1Password、Proton 等，只要它们使用的是这两种格式。
+内置 provider 包括 **OpenAI** 和 **Anthropic**。你也可以添加其他兼容的状态页 URL，例如 GitHub、Cloudflare、1Password、Proton、DeepSeek/Flashcat 等，只要它们使用的是这三种格式。
 
 在菜单栏中你可以：
 
@@ -72,15 +73,15 @@ MenuStatus 也内置了一个 **[AI Stupid Level](https://www.aistupidlevel.info
 - alerts
 - degradations
 
-也就是说，这个应用除了服务状态页之外，还多了一条工作流：快速判断模型质量和稳定性是不是在下滑。
+也就是说，这个应用除了服务状态页之外，还多了一条工作流：快速判断模型质量和稳定性是不是在下滑。AI 基准视图需要 API key；MenuStatus 会把它保存到 macOS Keychain，并默认使用更节制的 1 小时刷新间隔。
 
 ## 支持范围
 
 | 类别 | 支持内容 |
 | --- | --- |
-| 状态页 | Atlassian Statuspage、incident.io |
+| 状态页 | Atlassian Statuspage、incident.io、Flashduty/Flashcat |
 | 内置 provider | OpenAI、Anthropic |
-| 自定义 provider | 使用上述两种格式的兼容 URL |
+| 自定义 provider | 使用上述三种格式的兼容 URL |
 | AI 基准视图 | AI Stupid Level |
 
 ## 兼容性
@@ -89,13 +90,14 @@ MenuStatus 也内置了一个 **[AI Stupid Level](https://www.aistupidlevel.info
 
 - Atlassian Statuspage 页面
 - incident.io 页面
+- Flashduty / Flashcat HTML 状态页
 - 内置 OpenAI 和 Anthropic provider
-- 使用相同两种格式的兼容自定义 URL
+- 使用相同三种格式的兼容自定义 URL
 
 ### 不支持
 
-- 这两种格式之外的任意自定义状态网站
-- 没有兼容 Atlassian Statuspage / incident.io 结构的完全自定义状态页
+- 这三种格式之外的任意自定义状态网站
+- 没有兼容 Atlassian Statuspage / incident.io / Flashduty 结构的完全自定义状态页
 
 ## 下载
 
@@ -103,12 +105,13 @@ MenuStatus 也内置了一个 **[AI Stupid Level](https://www.aistupidlevel.info
 - 需要 **macOS 14.0+**
 - 仓库内置了 GitHub Actions 发布流，可以自动构建 Release `.app`、打包 `.dmg` 并上传到 Releases
 - 当签名和公证配置完成后，也可以配合 Sparkle 和 GitHub Pages appcast 做应用内更新
+- 可选的 benchmark API key 保存在 macOS Keychain 中，不会写入仓库或 UserDefaults
 
 如果 Apple 签名 / 公证 secrets 还没配好，workflow 仍然可以先发布未签名的 `.dmg`，这样发布链路仍然能先跑通。
 
 ## 隐私
 
-MenuStatus 只读取公开 HTTPS 状态接口和公开 AI 基准数据。不需要 API key、不需要账号，也不做核心功能相关的遥测。
+MenuStatus 只读取公开 HTTPS 状态接口和公开 AI 基准数据。状态页监控不需要账号；AI 基准视图使用用户提供的 API key，并将其保存在 macOS Keychain 中。MenuStatus 不发送遥测。
 
 ## 从源码构建
 
@@ -154,7 +157,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-workflow 定义在 `.github/workflows/release.yml`，打包脚本使用 [`package-app.sh`](./package-app.sh)。
+workflow 定义在 `.github/workflows/release.yml`，打包脚本使用 [`package-app.sh`](./package-app.sh)。在 `main` 分支上，可以使用 [`Scripts/release.sh`](./Scripts/release.sh) 检查工作区并推送版本 tag；真正的构建和发布由 CI 完成。
 
 默认使用 `hdiutil`，这样在 CI 里更稳定。如果你想在本地生成带 Finder 布局的样式化 DMG，并且已经安装了 [`create-dmg`](https://github.com/create-dmg/create-dmg)，可以运行 `USE_CREATE_DMG=1 ./package-app.sh 0.1.0`。
 
@@ -188,7 +191,7 @@ AIStupidLevelClient ──fetch──────────► AIStupidLevelSt
 | **Status Store** (`StatusStore.swift`) | 可观察状态、轮询、历史推导、分组 section |
 | **AI Stupid Level Client** (`AIStupidLevelClient.swift`) | benchmark、alerts、recommendations、degradations 和模型详情请求 |
 | **AI Stupid Level Store** (`AIStupidLevelStore.swift`) | benchmark 可观察状态、缓存、轮询和 hover 预取 |
-| **Views** | MenuBarExtra、provider tabs、uptime rows、benchmark 面板、设置页 |
+| **Views** | NSStatusItem + NSPopover、provider tabs、uptime rows、benchmark 面板、设置页 |
 
 生成的 `.xcodeproj` / `.xcworkspace` 和构建产物（`.build/`、`Derived/`）都已在 gitignore 中忽略。
 

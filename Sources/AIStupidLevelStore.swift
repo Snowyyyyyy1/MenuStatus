@@ -30,7 +30,7 @@ final class AIStupidLevelStore {
     private struct PersistedHoverCacheEntry: Codable {
         let cachedAt: Date
         let detail: BenchmarkModelDetail
-        let stats: BenchmarkModelStats
+        let stats: BenchmarkModelStats?
         let history: ModelHistoryPayload
     }
 
@@ -39,11 +39,13 @@ final class AIStupidLevelStore {
         let fetchGlobalIndex: @Sendable () async throws -> GlobalIndex
         let fetchDashboardAlerts: @Sendable () async throws -> [DashboardAlert]
         let fetchBatchStatus: @Sendable () async throws -> DashboardBatchStatusData
+        let fetchBatchStatusEnabled: Bool
         let fetchRecommendations: @Sendable () async throws -> AnalyticsRecommendationsPayload
         let fetchDegradations: @Sendable () async throws -> [AnalyticsDegradationItem]
         let fetchProviderReliability: @Sendable () async throws -> [ProviderReliabilityRow]
         let fetchModelDetail: @Sendable (String) async throws -> BenchmarkModelDetail
         let fetchModelStats: @Sendable (String) async throws -> BenchmarkModelStats
+        let fetchModelStatsEnabled: Bool
         let fetchModelHistory: @Sendable (String) async throws -> ModelHistoryPayload
 
         init(
@@ -51,6 +53,7 @@ final class AIStupidLevelStore {
             fetchGlobalIndex: @escaping @Sendable () async throws -> GlobalIndex,
             fetchDashboardAlerts: @escaping @Sendable () async throws -> [DashboardAlert],
             fetchBatchStatus: @escaping @Sendable () async throws -> DashboardBatchStatusData,
+            fetchBatchStatusEnabled: Bool = true,
             fetchRecommendations: @escaping @Sendable () async throws -> AnalyticsRecommendationsPayload,
             fetchDegradations: @escaping @Sendable () async throws -> [AnalyticsDegradationItem],
             fetchProviderReliability: @escaping @Sendable () async throws -> [ProviderReliabilityRow],
@@ -60,6 +63,7 @@ final class AIStupidLevelStore {
             fetchModelStats: @escaping @Sendable (String) async throws -> BenchmarkModelStats = { _ in
                 throw AIStupidLevelClientError.apiFailure("Model stats fetcher unavailable")
             },
+            fetchModelStatsEnabled: Bool = true,
             fetchModelHistory: @escaping @Sendable (String) async throws -> ModelHistoryPayload = { _ in
                 throw AIStupidLevelClientError.apiFailure("Model history fetcher unavailable")
             }
@@ -68,11 +72,13 @@ final class AIStupidLevelStore {
             self.fetchGlobalIndex = fetchGlobalIndex
             self.fetchDashboardAlerts = fetchDashboardAlerts
             self.fetchBatchStatus = fetchBatchStatus
+            self.fetchBatchStatusEnabled = fetchBatchStatusEnabled
             self.fetchRecommendations = fetchRecommendations
             self.fetchDegradations = fetchDegradations
             self.fetchProviderReliability = fetchProviderReliability
             self.fetchModelDetail = fetchModelDetail
             self.fetchModelStats = fetchModelStats
+            self.fetchModelStatsEnabled = fetchModelStatsEnabled
             self.fetchModelHistory = fetchModelHistory
         }
 
@@ -81,11 +87,13 @@ final class AIStupidLevelStore {
             fetchGlobalIndex: { try await AIStupidLevelClient.fetchGlobalIndex() },
             fetchDashboardAlerts: { try await AIStupidLevelClient.fetchDashboardAlerts() },
             fetchBatchStatus: { try await AIStupidLevelClient.fetchBatchStatus() },
+            fetchBatchStatusEnabled: false,
             fetchRecommendations: { try await AIStupidLevelClient.fetchRecommendations() },
             fetchDegradations: { try await AIStupidLevelClient.fetchDegradations() },
             fetchProviderReliability: { try await AIStupidLevelClient.fetchProviderReliability() },
             fetchModelDetail: { try await AIStupidLevelClient.fetchModelDetail(modelId: $0) },
             fetchModelStats: { try await AIStupidLevelClient.fetchModelStats(modelId: $0) },
+            fetchModelStatsEnabled: false,
             fetchModelHistory: { try await AIStupidLevelClient.fetchModelHistory(modelId: $0) }
         )
     }
@@ -103,6 +111,9 @@ final class AIStupidLevelStore {
     var lastRefreshed: Date?
     var isLoading = false
     var errorMessage: String?
+    private(set) var errorKinds: Set<AIStupidLevelErrorKind> = []
+    private(set) var failedDataSources: [String] = []
+    private(set) var hoverErrorKinds: [String: Set<AIStupidLevelErrorKind>] = [:]
 
     private let defaults: UserDefaults
     private let now: () -> Date
@@ -114,7 +125,7 @@ final class AIStupidLevelStore {
     private var currentRefresh: Task<Void, Never>?
     private var refreshGeneration: Int = 0
     private var lastPersistedDashboardFingerprint: Data?
-    private(set) var pollInterval: TimeInterval = 300
+    private(set) var pollInterval: TimeInterval = SettingsStore.defaultBenchmarkRefreshInterval
     private(set) var isConnected = true
 
     init(
@@ -130,6 +141,7 @@ final class AIStupidLevelStore {
     deinit {
         MainActor.assumeIsolated {
             stopPolling()
+            currentRefresh?.cancel()
             for (_, task) in hoverFetchTasks { task.cancel() }
             hoverFetchTasks.removeAll()
         }
@@ -148,9 +160,76 @@ final class AIStupidLevelStore {
     }
 
     func hasResolvedHoverPayload(for modelId: String) -> Bool {
-        modelDetailsByID[modelId] != nil
-            && modelStatsByModelID[modelId] != nil
-            && historyByModelID[modelId] != nil
+        // Stats are optional: the v1 API documents model detail and history, but not
+        // the legacy /stats endpoint. Detail + history is sufficient for the hover card.
+        modelDetailsByID[modelId] != nil && historyByModelID[modelId] != nil
+    }
+
+    func userFacingErrorMessage(locale: Locale) -> String? {
+        guard !errorKinds.isEmpty else { return nil }
+        if errorKinds.contains(.apiKeyRequired) {
+            return AppStrings.localizedString(
+                "benchmark.error.api-key-required",
+                locale: locale,
+                defaultValue: "Add an API key in Settings to load benchmark data."
+            )
+        }
+        if errorKinds.contains(.authenticationFailed) {
+            return AppStrings.localizedString(
+                "benchmark.error.authentication",
+                locale: locale,
+                defaultValue: "The benchmark API key was rejected. Check it in Settings."
+            )
+        }
+        if errorKinds.contains(.rateLimited) {
+            return AppStrings.localizedString(
+                "benchmark.error.rate-limited",
+                locale: locale,
+                defaultValue: "Benchmark refresh is temporarily rate-limited. Try again later."
+            )
+        }
+        if failedDataSources.count > 1 {
+            return AppStrings.localizedString(
+                "benchmark.error.partial",
+                locale: locale,
+                defaultValue: "Some benchmark data could not be refreshed; showing the last successful snapshot."
+            )
+        }
+        return AppStrings.localizedString(
+            "benchmark.error.unavailable",
+            locale: locale,
+            defaultValue: "Benchmark data is temporarily unavailable; showing the last successful snapshot."
+        )
+    }
+
+    func userFacingHoverErrorMessage(for modelId: String, locale: Locale) -> String? {
+        guard let kinds = hoverErrorKinds[modelId], !kinds.isEmpty else { return nil }
+        if kinds.contains(.apiKeyRequired) {
+            return AppStrings.localizedString(
+                "benchmark.hover.error.api-key-required",
+                locale: locale,
+                defaultValue: "Add an API key in Settings to load model details."
+            )
+        }
+        if kinds.contains(.authenticationFailed) {
+            return AppStrings.localizedString(
+                "benchmark.hover.error.authentication",
+                locale: locale,
+                defaultValue: "The benchmark API key was rejected."
+            )
+        }
+        if kinds.contains(.rateLimited) {
+            return AppStrings.localizedString(
+                "benchmark.hover.error.rate-limited",
+                locale: locale,
+                defaultValue: "Model details are temporarily rate-limited."
+            )
+        }
+        return AppStrings.localizedString(
+            "benchmark.hover.error.unavailable",
+            locale: locale,
+            defaultValue: "Model details are temporarily unavailable."
+        )
     }
 
     private static let popoverStaleThreshold: TimeInterval = 60
@@ -162,15 +241,18 @@ final class AIStupidLevelStore {
         startPollingLoop()
     }
 
-    private func startPollingLoop() {
+    private func startPollingLoop(fetchImmediately: Bool = true) {
         pollingTask?.cancel()
         pollingTask = Task { [weak self] in
+            guard let self else { return }
+            var shouldFetch = fetchImmediately
             while !Task.isCancelled {
-                if let self, self.isConnected {
+                if shouldFetch, self.isConnected {
                     await self.refreshNow()
                 }
+                shouldFetch = true
                 do {
-                    try await Task.sleep(for: .seconds(self?.pollInterval ?? 300))
+                    try await Task.sleep(for: .seconds(self.pollInterval))
                 } catch {
                     if Task.isCancelled { break }
                 }
@@ -182,8 +264,8 @@ final class AIStupidLevelStore {
         let isStale = lastRefreshed.map { now().timeIntervalSince($0) > Self.popoverStaleThreshold } ?? true
         guard isStale else { return }
         await refreshNow()
-        // See StatusStore.refreshIfStale — reset polling sleep to avoid back-to-back fetches.
-        startPollingLoop()
+        // See StatusStore.refreshIfStale — reset polling sleep without a duplicate fetch.
+        startPollingLoop(fetchImmediately: false)
     }
 
     func stopPolling() {
@@ -220,12 +302,16 @@ final class AIStupidLevelStore {
             if self.isConnected != connected { self.isConnected = connected }
             if connected, wasDisconnected {
                 if self.errorMessage != nil { self.errorMessage = nil }
+                self.errorKinds.removeAll()
+                self.failedDataSources.removeAll()
                 // Same race fix as StatusStore: cancel the in-flight refresh,
                 // then startPollingLoop replaces the cancelled polling task.
                 self.currentRefresh?.cancel()
                 self.startPollingLoop()
             } else if !connected {
                 if self.errorMessage != nil { self.errorMessage = nil }
+                self.errorKinds.removeAll()
+                self.failedDataSources.removeAll()
             }
         }
     }
@@ -257,6 +343,8 @@ final class AIStupidLevelStore {
     private func performRefresh(fetcher: Fetcher) async {
         isLoading = true
         errorMessage = nil
+        errorKinds.removeAll()
+        failedDataSources.removeAll()
 
         let fetchResults = await Self.fetchAll(
             existing: Snapshot(
@@ -278,20 +366,30 @@ final class AIStupidLevelStore {
         recommendations = fetchResults.recommendations
         degradations = fetchResults.degradations
         providerReliability = fetchResults.providerReliability
+        errorKinds = fetchResults.errorKinds
+        failedDataSources = fetchResults.failedDataSources
         if !fetchResults.errors.isEmpty {
             errorMessage = fetchResults.errors.joined(separator: "\n")
         }
 
-        lastRefreshed = now()
-        persistDashboardSnapshot()
+        // A refresh timestamp means that at least one primary payload (scores or
+        // global index) was successfully updated. Optional panels must not make a
+        // completely failed refresh look fresh.
+        if fetchResults.didUpdatePrimaryData {
+            lastRefreshed = now()
+            persistDashboardSnapshot()
+        }
         isLoading = false
     }
 
     func loadHoverDataIfNeeded(modelId: String, fetcher: Fetcher = .live) async {
         let needsDetail = modelDetailsByID[modelId] == nil
-        let needsStats = modelStatsByModelID[modelId] == nil
+        let needsStats = fetcher.fetchModelStatsEnabled && modelStatsByModelID[modelId] == nil
         let needsHistory = historyByModelID[modelId] == nil
-        guard needsDetail || needsStats || needsHistory else { return }
+        guard needsDetail || needsStats || needsHistory else {
+            hoverErrorKinds[modelId] = nil
+            return
+        }
 
         let task: Task<HoverFetchPayload, Never>
         if let existingTask = hoverFetchTasks[modelId] {
@@ -322,10 +420,13 @@ final class AIStupidLevelStore {
         if let history = payload.history {
             historyByModelID[modelId] = history
         }
-        if modelDetailsByID[modelId] != nil
-            || modelStatsByModelID[modelId] != nil
-            || historyByModelID[modelId] != nil {
+        if modelDetailsByID[modelId] != nil || historyByModelID[modelId] != nil {
             hoverCacheTimestamps[modelId] = now()
+        }
+        if payload.errorKinds.isEmpty {
+            hoverErrorKinds[modelId] = nil
+        } else {
+            hoverErrorKinds[modelId] = Set(payload.errorKinds)
         }
         // Enforce after inserting so the cap is exact (not off-by-one) and the just-written
         // model — which has the newest timestamp — is never the one evicted.
@@ -349,6 +450,7 @@ final class AIStupidLevelStore {
             modelDetailsByID.removeValue(forKey: key)
             modelStatsByModelID.removeValue(forKey: key)
             historyByModelID.removeValue(forKey: key)
+            hoverErrorKinds.removeValue(forKey: key)
             hoverCacheTimestamps.removeValue(forKey: key)
         }
     }
@@ -386,6 +488,9 @@ final class AIStupidLevelStore {
         var degradations: [AnalyticsDegradationItem]
         var providerReliability: [ProviderReliabilityRow]
         var errors: [String] = []
+        var errorKinds: Set<AIStupidLevelErrorKind> = []
+        var failedDataSources: [String] = []
+        var didUpdatePrimaryData = false
 
         init(existing: Snapshot) {
             scores = existing.scores
@@ -396,12 +501,30 @@ final class AIStupidLevelStore {
             degradations = existing.degradations
             providerReliability = existing.providerReliability
         }
+
+        mutating func recordFailure(source: String, error: Error) {
+            let kind: AIStupidLevelErrorKind
+            if let clientError = error as? AIStupidLevelClientError {
+                kind = clientError.kind
+            } else {
+                kind = .unavailable
+            }
+            errorKinds.insert(kind)
+            failedDataSources.append(source)
+            errors.append("\(source): \(error.localizedDescription)")
+        }
     }
 
     private struct HoverFetchPayload {
         let detail: BenchmarkModelDetail?
         let stats: BenchmarkModelStats?
         let history: ModelHistoryPayload?
+        let errorKinds: [AIStupidLevelErrorKind]
+    }
+
+    private struct OptionalFetchOutcome<Value: Sendable>: Sendable {
+        let value: Value?
+        let errorKind: AIStupidLevelErrorKind?
     }
 
     private enum PersistentCache {
@@ -473,7 +596,9 @@ final class AIStupidLevelStore {
 
         for (modelId, entry) in cache {
             modelDetailsByID[modelId] = entry.detail
-            modelStatsByModelID[modelId] = entry.stats
+            if let stats = entry.stats {
+                modelStatsByModelID[modelId] = stats
+            }
             historyByModelID[modelId] = entry.history
             hoverCacheTimestamps[modelId] = entry.cachedAt
         }
@@ -482,7 +607,6 @@ final class AIStupidLevelStore {
     private func persistHoverCacheEntryIfAvailable(for modelId: String) {
         guard
             let detail = modelDetailsByID[modelId],
-            let stats = modelStatsByModelID[modelId],
             let history = historyByModelID[modelId]
         else {
             return
@@ -492,7 +616,7 @@ final class AIStupidLevelStore {
         cache[modelId] = PersistedHoverCacheEntry(
             cachedAt: now(),
             detail: detail,
-            stats: stats,
+            stats: modelStatsByModelID[modelId],
             history: history
         )
         savePersistentHoverCache(cache)
@@ -569,11 +693,13 @@ final class AIStupidLevelStore {
                 }
             }
 
-            group.addTask {
-                do {
-                    return .batchStatus(.success(try await fetcher.fetchBatchStatus()))
-                } catch {
-                    return .batchStatus(.failure(error))
+            if fetcher.fetchBatchStatusEnabled {
+                group.addTask {
+                    do {
+                        return .batchStatus(.success(try await fetcher.fetchBatchStatus()))
+                    } catch {
+                        return .batchStatus(.failure(error))
+                    }
                 }
             }
 
@@ -605,32 +731,34 @@ final class AIStupidLevelStore {
                 switch result {
                 case .scores(.success(let scores)):
                     results.scores = scores
+                    results.didUpdatePrimaryData = true
                 case .scores(.failure(let error)):
-                    results.errors.append("Benchmark scores: \(error.localizedDescription)")
+                    results.recordFailure(source: "Benchmark scores", error: error)
                 case .globalIndex(.success(let index)):
                     results.globalIndex = index
+                    results.didUpdatePrimaryData = true
                 case .globalIndex(.failure(let error)):
-                    results.errors.append("Global index: \(error.localizedDescription)")
+                    results.recordFailure(source: "Global index", error: error)
                 case .dashboardAlerts(.success(let alerts)):
                     results.dashboardAlerts = alerts
-                case .dashboardAlerts(.failure):
-                    break
+                case .dashboardAlerts(.failure(let error)):
+                    results.recordFailure(source: "Benchmark alerts", error: error)
                 case .batchStatus(.success(let batchStatus)):
                     results.batchStatus = batchStatus
-                case .batchStatus(.failure):
-                    break
+                case .batchStatus(.failure(let error)):
+                    results.recordFailure(source: "Benchmark schedule", error: error)
                 case .recommendations(.success(let recommendations)):
                     results.recommendations = recommendations
-                case .recommendations(.failure):
-                    break
+                case .recommendations(.failure(let error)):
+                    results.recordFailure(source: "Benchmark recommendations", error: error)
                 case .degradations(.success(let degradations)):
                     results.degradations = degradations
-                case .degradations(.failure):
-                    break
+                case .degradations(.failure(let error)):
+                    results.recordFailure(source: "Benchmark degradations", error: error)
                 case .providerReliability(.success(let providerReliability)):
                     results.providerReliability = providerReliability
-                case .providerReliability(.failure):
-                    break
+                case .providerReliability(.failure(let error)):
+                    results.recordFailure(source: "Provider reliability", error: error)
                 }
             }
         }
@@ -645,14 +773,42 @@ final class AIStupidLevelStore {
         needsHistory: Bool,
         fetcher: Fetcher
     ) async -> HoverFetchPayload {
-        async let detail: BenchmarkModelDetail? = needsDetail ? try? await fetcher.fetchModelDetail(modelId) : nil
-        async let stats: BenchmarkModelStats? = needsStats ? try? await fetcher.fetchModelStats(modelId) : nil
-        async let history: ModelHistoryPayload? = needsHistory ? try? await fetcher.fetchModelHistory(modelId) : nil
+        async let detailOutcome = fetchOptional(needsDetail) {
+            try await fetcher.fetchModelDetail(modelId)
+        }
+        async let statsOutcome = fetchOptional(needsStats) {
+            try await fetcher.fetchModelStats(modelId)
+        }
+        async let historyOutcome = fetchOptional(needsHistory) {
+            try await fetcher.fetchModelHistory(modelId)
+        }
 
-        return await HoverFetchPayload(
-            detail: detail,
-            stats: stats,
-            history: history
+        let detail = await detailOutcome
+        let stats = await statsOutcome
+        let history = await historyOutcome
+        let errorKinds = [detail.errorKind, stats.errorKind, history.errorKind].compactMap { $0 }
+
+        return HoverFetchPayload(
+            detail: detail.value,
+            stats: stats.value,
+            history: history.value,
+            errorKinds: errorKinds
         )
     }
+
+    nonisolated private static func fetchOptional<Value: Sendable>(
+        _ shouldFetch: Bool,
+        operation: @escaping @Sendable () async throws -> Value
+    ) async -> OptionalFetchOutcome<Value> {
+        guard shouldFetch else {
+            return OptionalFetchOutcome(value: nil, errorKind: nil)
+        }
+        do {
+            return OptionalFetchOutcome(value: try await operation(), errorKind: nil)
+        } catch {
+            let kind = (error as? AIStupidLevelClientError)?.kind ?? .unavailable
+            return OptionalFetchOutcome(value: nil, errorKind: kind)
+        }
+    }
+
 }

@@ -79,10 +79,21 @@ final class UpdaterServiceTests: XCTestCase {
         XCTAssertEqual(config.availability, .notInstalledToApplications)
     }
 
+    func testAvailabilityAcceptsUserApplicationsDirectory() {
+        let config = UpdaterConfiguration(
+            feedURLString: "https://snowyyyyyy1.github.io/MenuStatus/appcast.xml",
+            publicEDKey: "PUBLIC_KEY",
+            bundlePath: "/Users/snowyy/Applications/MenuStatus.app"
+        )
+
+        XCTAssertTrue(config.isAvailable)
+        XCTAssertEqual(config.availability, .available)
+    }
+
     func testAvailabilityMessageExplainsWhyUpdatesAreDisabled() {
         XCTAssertEqual(
             UpdaterAvailability.notInstalledToApplications.diagnosticMessage,
-            "Install MenuStatus to /Applications to enable in-app updates."
+            "Install MenuStatus to /Applications or ~/Applications to enable in-app updates."
         )
         XCTAssertEqual(
             UpdaterAvailability.buildProducts.diagnosticMessage,

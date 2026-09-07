@@ -376,7 +376,7 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
     func popoverDidShow(_ notification: Notification) {
         stabilizeShownPopover()
         Task { [weak store] in await store?.refreshIfStale() }
-        if store.settings.showBenchmark {
+        if store.settings.showBenchmark && !store.settings.benchmarkAPIKey.isEmpty {
             Task { [weak benchmarkStore] in await benchmarkStore?.refreshIfStale() }
         }
     }

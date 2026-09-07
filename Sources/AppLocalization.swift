@@ -65,6 +65,36 @@ enum AppStrings {
         }
     }
 
+    static func benchmarkRefreshIntervalLabel(_ interval: TimeInterval, locale: Locale) -> String {
+        switch Int(interval) {
+        case 3600:
+            return localizedString(
+                "settings.benchmark.refresh.1-hour",
+                locale: locale,
+                defaultValue: "1 hour"
+            )
+        case 21600:
+            return localizedString(
+                "settings.benchmark.refresh.6-hours",
+                locale: locale,
+                defaultValue: "6 hours"
+            )
+        case 86400:
+            return localizedString(
+                "settings.benchmark.refresh.daily",
+                locale: locale,
+                defaultValue: "Daily"
+            )
+        default:
+            return format(
+                "settings.benchmark.refresh.custom-hours",
+                locale: locale,
+                defaultValue: "%lld hours",
+                Int64(max(1, interval / 3600))
+            )
+        }
+    }
+
     static func menuBarIconStyleName(_ style: MenuBarIconStyle, locale: Locale) -> String {
         switch style {
         case .outline:

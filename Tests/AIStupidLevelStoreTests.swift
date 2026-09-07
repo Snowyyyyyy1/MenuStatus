@@ -120,7 +120,11 @@ final class AIStupidLevelStoreTests: XCTestCase {
         )
 
         await partialStore.loadHoverDataIfNeeded(modelId: "38", fetcher: fetcher)
-        XCTAssertFalse(partialStore.hasResolvedHoverPayload(for: "38"))
+        XCTAssertTrue(partialStore.hasResolvedHoverPayload(for: "38"))
+        XCTAssertEqual(
+            partialStore.hoverErrorKinds["38"],
+            [.unavailable]
+        )
     }
 
     @MainActor
@@ -215,6 +219,69 @@ final class AIStupidLevelStoreTests: XCTestCase {
         XCTAssertEqual(store.providerReliability.map(\.provider), ["openai"])
         XCTAssertNotNil(store.lastRefreshed)
         XCTAssertFalse(store.isLoading)
+        XCTAssertEqual(
+            Set(store.failedDataSources),
+            [
+                "Benchmark alerts",
+                "Benchmark schedule",
+                "Benchmark recommendations",
+                "Benchmark degradations",
+                "Provider reliability",
+            ]
+        )
+        XCTAssertEqual(store.errorKinds, [.unavailable])
+        XCTAssertNotNil(store.userFacingErrorMessage(locale: Locale(identifier: "en")))
+    }
+
+    @MainActor
+    func testRefreshNowPreservesSnapshotAndTimestampWhenPrimaryFetchesFail() async throws {
+        let defaults = makeIsolatedDefaults(testName: #function)
+        var clock = Date(timeIntervalSince1970: 1_000)
+        let store = AIStupidLevelStore(defaults: defaults, now: { clock })
+        let successfulFetcher = AIStupidLevelStore.Fetcher(
+            fetchScores: { [self.makeScore(id: "old", provider: "openai", score: 72, status: .good)] },
+            fetchGlobalIndex: { self.makeGlobalIndex(score: 72) },
+            fetchDashboardAlerts: { [] },
+            fetchBatchStatus: { DashboardBatchStatusData(isBatchInProgress: nil, schedulerRunning: nil, nextScheduledRun: nil) },
+            fetchRecommendations: { AnalyticsRecommendationsPayload(bestForCode: nil, mostReliable: nil, fastestResponse: nil, avoidNow: []) },
+            fetchDegradations: { [] },
+            fetchProviderReliability: { [] }
+        )
+        await store.refreshNow(fetcher: successfulFetcher)
+
+        let previousTimestamp = try XCTUnwrap(store.lastRefreshed)
+        let previousScores = store.scores
+        let previousGlobalIndex = try XCTUnwrap(store.globalIndex)
+        clock = Date(timeIntervalSince1970: 2_000)
+
+        let failingFetcher = AIStupidLevelStore.Fetcher(
+            fetchScores: { throw StubError.failed },
+            fetchGlobalIndex: { throw StubError.failed },
+            fetchDashboardAlerts: { throw StubError.failed },
+            fetchBatchStatus: { throw StubError.failed },
+            fetchRecommendations: { throw StubError.failed },
+            fetchDegradations: { throw StubError.failed },
+            fetchProviderReliability: { throw StubError.failed }
+        )
+        await store.refreshNow(fetcher: failingFetcher)
+
+        XCTAssertEqual(store.scores, previousScores)
+        XCTAssertEqual(store.globalIndex?.current.globalScore, previousGlobalIndex.current.globalScore)
+        XCTAssertEqual(store.lastRefreshed, previousTimestamp)
+        XCTAssertTrue(store.errorKinds.contains(.unavailable))
+        XCTAssertTrue(store.failedDataSources.contains("Benchmark scores"))
+        XCTAssertTrue(store.failedDataSources.contains("Global index"))
+        XCTAssertFalse(store.isLoading)
+    }
+
+    @MainActor
+    func testLiveFetcherDisablesUndocumentedRequestsAndUsesSafeDefaultInterval() {
+        XCTAssertFalse(AIStupidLevelStore.Fetcher.live.fetchBatchStatusEnabled)
+        XCTAssertFalse(AIStupidLevelStore.Fetcher.live.fetchModelStatsEnabled)
+        XCTAssertEqual(
+            AIStupidLevelStore(defaults: makeIsolatedDefaults(testName: #function)).pollInterval,
+            SettingsStore.defaultBenchmarkRefreshInterval
+        )
     }
 
     @MainActor
@@ -448,7 +515,8 @@ final class AIStupidLevelStoreTests: XCTestCase {
         XCTAssertEqual(store.modelDetailsByID["38"]?.id, 38)
         XCTAssertNil(store.modelStatsByModelID["38"])
         XCTAssertEqual(store.historyByModelID["38"]?.history.count, 1)
-        XCTAssertFalse(store.hasResolvedHoverPayload(for: "38"))
+        XCTAssertTrue(store.hasResolvedHoverPayload(for: "38"))
+        XCTAssertEqual(store.hoverErrorKinds["38"], [.unavailable])
     }
 
     @MainActor
@@ -483,8 +551,9 @@ final class AIStupidLevelStoreTests: XCTestCase {
         )
 
         await store.loadHoverDataIfNeeded(modelId: "38", fetcher: fetcher)
-        XCTAssertFalse(store.hasResolvedHoverPayload(for: "38"))
+        XCTAssertTrue(store.hasResolvedHoverPayload(for: "38"))
         XCTAssertNil(store.modelStatsByModelID["38"])
+        XCTAssertEqual(store.hoverErrorKinds["38"], [.unavailable])
 
         await statsShouldFail.set(false)
         await store.loadHoverDataIfNeeded(modelId: "38", fetcher: fetcher)

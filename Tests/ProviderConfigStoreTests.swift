@@ -47,6 +47,26 @@ final class ProviderConfigStoreTests: XCTestCase {
         XCTAssertNil(configStore.provider(for: custom.id))
     }
 
+    @MainActor
+    func testPersistenceFailureIsSurfaced() {
+        let missingParent = FileManager.default.temporaryDirectory
+            .appendingPathComponent("provider-storage-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("providers.json")
+        let store = ProviderConfigStore(fileURL: missingParent)
+        let custom = ProviderConfig(
+            id: "persistence-failure",
+            displayName: "Custom",
+            baseURL: URL(string: "https://status.example.com")!,
+            platform: .atlassianStatuspage,
+            isBuiltIn: false
+        )
+
+        store.addProvider(custom)
+
+        XCTAssertNotNil(store.persistenceErrorMessage)
+        XCTAssertTrue(store.persistenceErrorMessage?.contains("Could not save providers") == true)
+    }
+
     // MARK: - detectPlatform
 
     func testDetectPlatformReturnsAtlassianForPlainHTML() async throws {

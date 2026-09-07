@@ -1,21 +1,36 @@
 import Foundation
 import Observation
+import OSLog
 
 @MainActor @Observable
 final class ProviderConfigStore {
+    private static let logger = Logger(subsystem: "com.snowyy.MenuStatus", category: "ProviderConfigStore")
+
     private(set) var providers: [ProviderConfig]
+    private(set) var persistenceErrorMessage: String?
     private let fileURL: URL
 
     init(removedBuiltInIDs: Set<String> = [], fileURL: URL? = nil) {
+        var directoryError: Error?
         if let fileURL {
             self.fileURL = fileURL
         } else {
-            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+                ?? FileManager.default.homeDirectoryForCurrentUser
+                    .appendingPathComponent("Library/Application Support", isDirectory: true)
             let dir = appSupport.appendingPathComponent("MenuStatus", isDirectory: true)
-            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            do {
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            } catch {
+                directoryError = error
+            }
             self.fileURL = dir.appendingPathComponent("providers.json")
         }
         self.providers = ProviderConfig.builtInProviders.filter { !removedBuiltInIDs.contains($0.id) }
+        self.persistenceErrorMessage = directoryError.map { "Could not prepare provider storage: \($0.localizedDescription)" }
+        if let directoryError {
+            Self.logger.error("Could not prepare provider storage: \(directoryError.localizedDescription, privacy: .public)")
+        }
         loadFromDisk()
     }
 
@@ -129,17 +144,31 @@ final class ProviderConfigStore {
 
     private func saveToDisk() {
         let custom = providers.filter { !$0.isBuiltIn }
-        guard let data = try? Self.encoder.encode(custom) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        do {
+            let data = try Self.encoder.encode(custom)
+            try data.write(to: fileURL, options: .atomic)
+            persistenceErrorMessage = nil
+        } catch {
+            recordPersistenceError(error, operation: "Could not save providers")
+        }
     }
 
     private func loadFromDisk() {
-        guard let data = try? Data(contentsOf: fileURL),
-              let custom = try? Self.decoder.decode([ProviderConfig].self, from: data) else {
-            return
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+
+        do {
+            let data = try Data(contentsOf: fileURL)
+            let custom = try Self.decoder.decode([ProviderConfig].self, from: data)
+            for config in custom where !providers.contains(where: { $0.id == config.id }) {
+                providers.append(config)
+            }
+        } catch {
+            recordPersistenceError(error, operation: "Could not load providers")
         }
-        for config in custom where !providers.contains(where: { $0.id == config.id }) {
-            providers.append(config)
-        }
+    }
+
+    private func recordPersistenceError(_ error: Error, operation: String) {
+        persistenceErrorMessage = "\(operation): \(error.localizedDescription)"
+        Self.logger.error("\(operation, privacy: .public): \(error.localizedDescription, privacy: .public)")
     }
 }

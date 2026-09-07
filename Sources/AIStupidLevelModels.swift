@@ -26,7 +26,7 @@ private enum BenchmarkLossyNumericDecoder {
     }
 }
 
-/// GET /api/dashboard/scores → { success, data: [BenchmarkScore] }
+/// GET /api/v1/models → { success, data: [BenchmarkScore] }
 struct BenchmarkScoresResponse: Codable {
     let success: Bool
     let data: [BenchmarkScore]
@@ -138,7 +138,7 @@ enum BenchmarkStatus: String, Codable {
     }
 }
 
-/// GET /api/dashboard/global-index → { success, data: { current, history, trend, ... } }
+/// GET /api/v1/index → { success, data: { current, history, trend, ... } }
 struct GlobalIndexResponse: Codable {
     let success: Bool
     let data: GlobalIndex

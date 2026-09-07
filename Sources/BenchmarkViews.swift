@@ -89,6 +89,7 @@ struct BenchmarkModelHoverCard: View {
     let detail: BenchmarkModelDetail?
     let stats: BenchmarkModelStats?
     let history: ModelHistoryPayload?
+    let errorMessage: String?
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.locale) private var locale
 
@@ -203,6 +204,13 @@ struct BenchmarkModelHoverCard: View {
                         )
                     }
                 }
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let stats {

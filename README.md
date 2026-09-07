@@ -14,11 +14,11 @@
   <img alt="Platform macOS 14+" src="https://img.shields.io/badge/platform-macOS%2014%2B-black">
 </p>
 
-A native macOS menu bar app for two supported kinds of public status pages, plus a built-in AI benchmark snapshot view.
+A native macOS menu bar app for three supported kinds of public status pages, plus a built-in AI benchmark snapshot view.
 
 MenuStatus has two primary views:
 
-- **Supported Status Pages**: parse public status pages built on **[Atlassian Statuspage](https://www.atlassian.com/software/statuspage)** and **[incident.io](https://incident.io/status-pages)**
+- **Supported Status Pages**: parse public status pages built on **[Atlassian Statuspage](https://www.atlassian.com/software/statuspage)**, **[incident.io](https://incident.io/status-pages)**, and Flashduty/Flashcat-hosted pages
 - **[AI Stupid Level](https://www.aistupidlevel.info/)**: check benchmark snapshots including global index, model ranking, vendor comparison, recommendations, alerts, and degradations
 
 <p align="center">
@@ -45,12 +45,13 @@ MenuStatus has two primary views:
 
 ### Supported Status Pages
 
-MenuStatus is not a generic parser for arbitrary status sites. It currently supports two status-page platforms only:
+MenuStatus is not a generic parser for arbitrary status sites. It currently supports three status-page platforms:
 
 - **[Atlassian Statuspage](https://www.atlassian.com/software/statuspage)**
 - **[incident.io](https://incident.io/status-pages)**
+- **Flashduty / Flashcat-hosted HTML status pages**
 
-Built-in providers include **OpenAI** and **Anthropic**. You can also add compatible URLs from services built on those same two formats, such as GitHub, Cloudflare, 1Password, Proton, and similar providers.
+Built-in providers include **OpenAI** and **Anthropic**. You can also add compatible URLs from services built on those formats, such as GitHub, Cloudflare, 1Password, Proton, DeepSeek/Flashcat-hosted pages, and similar providers.
 
 From the menu bar you can:
 
@@ -72,15 +73,15 @@ It surfaces:
 - alerts
 - degradations
 
-This gives the app a second primary workflow alongside service-status tracking: checking whether model quality and reliability appear to be slipping.
+This gives the app a second primary workflow alongside service-status tracking: checking whether model quality and reliability appear to be slipping. The benchmark service requires an API key; MenuStatus stores it in the macOS Keychain and defaults to a quota-conscious one-hour refresh interval.
 
 ## Supported Platforms
 
 | Area | Support |
 | --- | --- |
-| Status pages | Atlassian Statuspage, incident.io |
+| Status pages | Atlassian Statuspage, incident.io, Flashduty/Flashcat |
 | Built-in providers | OpenAI, Anthropic |
-| Custom providers | Compatible URLs using those same two formats |
+| Custom providers | Compatible URLs using those three formats |
 | AI benchmark view | AI Stupid Level |
 
 ## Compatibility
@@ -89,13 +90,14 @@ This gives the app a second primary workflow alongside service-status tracking: 
 
 - Atlassian Statuspage pages
 - incident.io pages
+- Flashduty / Flashcat-hosted HTML status pages
 - built-in OpenAI and Anthropic providers
-- compatible custom URLs using those same two page formats
+- compatible custom URLs using those three page formats
 
 ### Not Supported
 
 - arbitrary custom status websites outside those formats
-- providers with fully custom status UIs that do not expose compatible Atlassian Statuspage or incident.io structures
+- providers with fully custom status UIs that do not expose compatible Atlassian Statuspage, incident.io, or Flashduty structures
 
 ## Download
 
@@ -103,12 +105,13 @@ This gives the app a second primary workflow alongside service-status tracking: 
 - Requires **macOS 14.0+**
 - The repository includes a GitHub Actions workflow that builds a Release `.app`, packages it as a `.dmg`, and uploads it to Releases
 - Signed release builds can use Sparkle and GitHub Pages appcast updates when signing/notarization is configured
+- The optional benchmark API key is stored in the macOS Keychain; it is not written to the repository or UserDefaults
 
 If Apple signing and notarization secrets are not configured yet, the workflow can still publish an unsigned `.dmg` so the release path remains testable end to end.
 
 ## Privacy
 
-MenuStatus reads public HTTPS status endpoints and public AI benchmark data. No API keys, no accounts, and no telemetry are required for the core experience.
+MenuStatus reads public HTTPS status endpoints and public AI benchmark data. Status-page monitoring needs no account; the optional AI benchmark view uses a user-provided API key stored in the macOS Keychain. MenuStatus does not send telemetry.
 
 ## Build From Source
 
@@ -154,7 +157,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The workflow is defined in `.github/workflows/release.yml` and uses [`package-app.sh`](./package-app.sh).
+The workflow is defined in `.github/workflows/release.yml` and uses [`package-app.sh`](./package-app.sh). For a checked-out `main` branch, [`Scripts/release.sh`](./Scripts/release.sh) validates a clean tree and pushes the version tag; CI performs the actual release once the tag is pushed.
 
 By default the script uses `hdiutil` so it works reliably in CI. If you want a styled Finder layout locally and already have [`create-dmg`](https://github.com/create-dmg/create-dmg) installed, run `USE_CREATE_DMG=1 ./package-app.sh 0.1.0`.
 
@@ -188,7 +191,7 @@ AIStupidLevelClient ──fetch──────────► AIStupidLevelSt
 | **Status Store** (`StatusStore.swift`) | Observable state, polling, history derivation, grouped sections |
 | **AI Stupid Level Client** (`AIStupidLevelClient.swift`) | Benchmark, alerts, recommendations, degradations, and model-detail fetches |
 | **AI Stupid Level Store** (`AIStupidLevelStore.swift`) | Observable benchmark state, caching, polling, and hover prefetching |
-| **Views** | MenuBarExtra, provider tabs, uptime rows, benchmark panels, settings |
+| **Views** | NSStatusItem + NSPopover, provider tabs, uptime rows, benchmark panels, settings |
 
 Generated `.xcodeproj` / `.xcworkspace` and build outputs (`.build/`, `Derived/`) are gitignored.
 

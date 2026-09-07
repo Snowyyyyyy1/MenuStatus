@@ -47,6 +47,7 @@ struct AIStupidLevelPageView: View {
             recommendationsSection
             alertsSection
             degradationsSection
+            benchmarkSourceFooter
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
@@ -54,6 +55,30 @@ struct AIStupidLevelPageView: View {
         .onDisappear {
             onHoverChange(nil)
         }
+    }
+
+    private var benchmarkSourceFooter: some View {
+        HStack(spacing: 4) {
+            Text(AppStrings.localizedString(
+                "benchmark.source.label",
+                locale: locale,
+                defaultValue: "Data provided by"
+            ))
+                .font(.system(size: 9))
+                .foregroundStyle(.tertiary)
+            Link(
+                AppStrings.localizedString(
+                    "benchmark.source.name",
+                    locale: locale,
+                    defaultValue: "aistupidlevel.info"
+                ),
+                destination: AIStupidLevelClient.baseURL
+            )
+                .font(.system(size: 9))
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.top, 10)
+        .padding(.bottom, 2)
     }
 
     @ViewBuilder

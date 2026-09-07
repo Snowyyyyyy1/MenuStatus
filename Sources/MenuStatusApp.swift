@@ -17,8 +17,8 @@ struct MenuStatusApp: App {
         let store = StatusStore(settings: settings)
         store.startPolling()
         let benchmarkStore = AIStupidLevelStore()
-        if settings.showBenchmark {
-            benchmarkStore.startPolling(interval: 300)
+        if settings.showBenchmark && !settings.benchmarkAPIKey.isEmpty {
+            benchmarkStore.startPolling(interval: settings.benchmarkRefreshInterval)
         }
         let paneSelection = SettingsPaneSelection()
         _settings = State(initialValue: settings)
@@ -33,10 +33,22 @@ struct MenuStatusApp: App {
         WindowGroup(SettingsSceneBridge.keepaliveWindowTitle) {
             HiddenSettingsBridgeView()
                 .onChange(of: settings.showBenchmark) { _, show in
-                    if show {
-                        benchmarkStore.startPolling(interval: 300)
+                    if show && !settings.benchmarkAPIKey.isEmpty {
+                        benchmarkStore.startPolling(interval: settings.benchmarkRefreshInterval)
                     } else {
                         benchmarkStore.stopPolling()
+                    }
+                }
+                .onChange(of: settings.benchmarkAPIKey) { _, apiKey in
+                    if settings.showBenchmark && !apiKey.isEmpty {
+                        benchmarkStore.startPolling(interval: settings.benchmarkRefreshInterval)
+                    } else {
+                        benchmarkStore.stopPolling()
+                    }
+                }
+                .onChange(of: settings.benchmarkRefreshInterval) { _, interval in
+                    if settings.showBenchmark && !settings.benchmarkAPIKey.isEmpty {
+                        benchmarkStore.startPolling(interval: interval)
                     }
                 }
         }
